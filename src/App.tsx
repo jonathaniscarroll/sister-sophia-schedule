@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Calendar, Clock, Users, User, Plus, X, Check, Edit, Trash, Lock, CheckCircle } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
+// Types
 type UserType = {
   id: string;
   name: string;
@@ -31,14 +32,42 @@ type Rehearsal = {
   participants: string[];
 };
 
+// Redis API helpers
+async function fetchRedisData(key: string): Promise<any> {
+  try {
+    const response = await fetch('/api/redis/get', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ key }),
+    });
+    const data = await response.json();
+    return data.value || [];
+  } catch (error) {
+    console.error('Error fetching Redis data:', error);
+    return [];
+  }
+}
+
+async function saveRedisData(key: string, value: any): Promise<void> {
+  try {
+    await fetch('/api/redis/set', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ key, value }),
+    });
+  } catch (error) {
+    console.error('Error saving to Redis:', error);
+  }
+}
+
 export default function RehearsalScheduler() {
+  // State
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [users, setUsers] = useState<UserType[]>([
-    { id: '1', name: 'Robin', email: 'rjlmoir@gmail.com', instrument: 'Stage Manager', color: 'bg-blue-500' },
-    { id: '2', name: 'Kate', email: 'kate.johnston54@gmail.com', instrument: 'Director', color: 'bg-green-500' },
-    { id: '3', name: 'Lisa', email: 'lrandall223@gmail.com', instrument: 'Sister Sophia', color: 'bg-purple-500' },
-    { id: '4', name: 'Jonathan', email: 'jonathaniscarroll@gmail.com', instrument: 'Tech', color: 'bg-red-500' },
-  ]);
+  const [users, setUsers] = useState<UserType[]>([]);
   const [availabilities, setAvailabilities] = useState<Availability[]>([]);
   const [rehearsals, setRehearsals] = useState<Rehearsal[]>([]);
   const [isAddingRehearsal, setIsAddingRehearsal] = useState(false);
@@ -57,21 +86,79 @@ export default function RehearsalScheduler() {
     location: '',
     description: ''
   });
-
-  // Drag selection state
   const [currentUser, setCurrentUser] = useState<string>('');
   const [markingMode, setMarkingMode] = useState<'available' | 'unavailable'>('available');
   const [isDragging, setIsDragging] = useState(false);
   const [dragStartDate, setDragStartDate] = useState<Date | null>(null);
   const [dragEndDate, setDragEndDate] = useState<Date | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const calendarRef = useRef<HTMLDivElement>(null);
 
-  // Helper function to format dates as YYYY-MM-DD
+  // Load data from Redis on mount
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [usersData, availabilitiesData, rehearsalsData] = await Promise.all([
+          fetchRedisData('users'),
+          fetchRedisData('availabilities'),
+          fetchRedisData('rehearsals')
+        ]);
+
+        // Set initial users if none exist
+        const initialUsers = usersData.length > 0 ? usersData : [
+          { id: '1', name: 'Robin', email: 'rjlmoir@gmail.com', instrument: 'Stage Manager', color: 'bg-blue-500' },
+          { id: '2', name: 'Kate', email: 'kate.johnston54@gmail.com', instrument: 'Director', color: 'bg-green-500' },
+          { id: '3', name: 'Lisa', email: 'lrandall223@gmail.com', instrument: 'Sister Sophia', color: 'bg-purple-500' },
+          { id: '4', name: 'Jonathan', email: 'jonathaniscarroll@gmail.com', instrument: 'Tech', color: 'bg-red-500' },
+        ];
+
+        setUsers(initialUsers);
+        setAvailabilities(availabilitiesData);
+        setRehearsals(rehearsalsData);
+        setIsLoading(false);
+
+        // Save initial users if none existed
+        if (usersData.length === 0) {
+          await saveRedisData('users', initialUsers);
+        }
+      } catch (error) {
+        console.error("Failed to load data:", error);
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+
+    // Set up polling for real-time updates (every 5 seconds)
+    const interval = setInterval(loadData, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Save data to Redis whenever it changes
+  useEffect(() => {
+    if (isLoading) return;
+
+    const saveData = async () => {
+      try {
+        await Promise.all([
+          saveRedisData('users', users),
+          saveRedisData('availabilities', availabilities),
+          saveRedisData('rehearsals', rehearsals)
+        ]);
+      } catch (error) {
+        console.error("Failed to save data:", error);
+      }
+    };
+
+    const debounceTimer = setTimeout(saveData, 1000);
+    return () => clearTimeout(debounceTimer);
+  }, [users, availabilities, rehearsals, isLoading]);
+
+  // Helper functions
   const formatDate = (date: Date): string => {
     return date.toISOString().split('T')[0];
   };
 
-  // Fixed calendar generation function
   const getDaysInMonth = (year: number, month: number) => {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
@@ -106,7 +193,7 @@ export default function RehearsalScheduler() {
     currentMonth.getMonth()
   );
 
-  // Handle month navigation
+  // Month navigation
   const prevMonth = () => {
     setCurrentMonth(new Date(
       currentMonth.getFullYear(),
@@ -123,7 +210,7 @@ export default function RehearsalScheduler() {
     ));
   };
 
-  // Validate user input
+  // User management
   const validateUser = (user: Partial<UserType>) => {
     const newErrors: Record<string, string> = {};
     if (!user.name?.trim()) newErrors.name = 'Name is required';
@@ -131,8 +218,7 @@ export default function RehearsalScheduler() {
     return newErrors;
   };
 
-  // Add a new user
-  const addUser = () => {
+  const addUser = async () => {
     const validationErrors = validateUser(newUser);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
@@ -153,8 +239,7 @@ export default function RehearsalScheduler() {
     setErrors({});
   };
 
-  // Edit an existing user
-  const editUser = () => {
+  const editUser = async () => {
     if (!editingUser) return;
 
     const validationErrors = validateUser(editingUser);
@@ -168,8 +253,7 @@ export default function RehearsalScheduler() {
     setErrors({});
   };
 
-  // Delete a user
-  const deleteUser = (userId: string) => {
+  const deleteUser = async (userId: string) => {
     if (window.confirm('Are you sure you want to delete this team member?')) {
       setUsers(users.filter(u => u.id !== userId));
       setAvailabilities(availabilities.filter(a => a.userId !== userId));
@@ -180,26 +264,23 @@ export default function RehearsalScheduler() {
     }
   };
 
-  // Get availability for a user on a specific date
+  // Rehearsal management
   const getUserAvailability = (userId: string, date: Date) => {
     const dateStr = formatDate(date);
     return availabilities.find(a => a.userId === userId && a.date === dateStr);
   };
 
-  // Check if a date has a rehearsal scheduled
   const hasRehearsal = (date: Date) => {
     const dateStr = formatDate(date);
     return rehearsals.some(r => r.date === dateStr);
   };
 
-  // Get rehearsal details for a date
   const getRehearsal = (date: Date) => {
     const dateStr = formatDate(date);
     return rehearsals.find(r => r.date === dateStr);
   };
 
-  // Schedule a new rehearsal
-  const scheduleRehearsal = () => {
+  const scheduleRehearsal = async () => {
     if (!newRehearsal.date || !newRehearsal.time || !newRehearsal.location) {
       alert('Please fill in all required fields');
       return;
@@ -226,7 +307,7 @@ export default function RehearsalScheduler() {
     setIsAddingRehearsal(false);
   };
 
-  // Input change handlers
+  // Drag selection
   const handleRehearsalInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setNewRehearsal(prev => ({
@@ -250,7 +331,6 @@ export default function RehearsalScheduler() {
     }
   };
 
-  // Drag selection handlers
   const handleDragStart = (date: Date) => {
     if (!currentUser) return;
     setIsDragging(true);
@@ -313,7 +393,6 @@ export default function RehearsalScheduler() {
     setDragEndDate(null);
   };
 
-  // Check if a date is in the current drag selection
   const isDateInDragSelection = (date: Date) => {
     if (!isDragging || !dragStartDate || !dragEndDate) return false;
 
@@ -323,7 +402,7 @@ export default function RehearsalScheduler() {
     return date >= start && date <= end && date.getMonth() === currentMonth.getMonth();
   };
 
-  // Custom Modal Component
+  // Modal Component
   const Modal = ({ isOpen, onClose, children, title }: {
     isOpen: boolean;
     onClose: () => void;
@@ -350,6 +429,17 @@ export default function RehearsalScheduler() {
       </div>
     );
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-lg h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <p>Loading rehearsal data...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -691,124 +781,124 @@ export default function RehearsalScheduler() {
                     type="time"
                     name="time"
                     value={newRehearsal.time}
-                    onChange={handleRehearsalInputChange}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">
-                    Duration
-                  </label>
-                  <Select
-                    value={newRehearsal.duration}
-                    onValueChange={(value) => setNewRehearsal({...newRehearsal, duration: value})}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select duration" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1 hour">1 hour</SelectItem>
-                      <SelectItem value="1.5 hours">1.5 hours</SelectItem>
-                      <SelectItem value="2 hours">2 hours</SelectItem>
-                      <SelectItem value="3 hours">3 hours</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Location *
-                </label>
-                <Input
-                  name="location"
-                  value={newRehearsal.location}
                   onChange={handleRehearsalInputChange}
-                  placeholder="Enter location"
                 />
               </div>
-
               <div>
                 <label className="block text-sm font-medium mb-1">
-                  Description
+                  Duration
                 </label>
-                <Textarea
-                  name="description"
-                  value={newRehearsal.description}
-                  onChange={handleRehearsalInputChange}
-                  placeholder="Enter rehearsal details"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Participants ({users.length})
-                </label>
-                <div className="space-y-2 max-h-40 overflow-y-auto p-2 border rounded">
-                  {users.map(user => (
-                    <div key={user.id} className="flex items-center gap-2">
-                      <div className={`h-3 w-3 rounded-full ${user.color}`} />
-                      <span>{user.name}</span>
-                      {user.instrument && (
-                        <span className="text-xs text-muted-foreground ml-auto">({user.instrument})</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                <Select
+                  value={newRehearsal.duration}
+                  onValueChange={(value) => setNewRehearsal({...newRehearsal, duration: value})}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select duration" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1 hour">1 hour</SelectItem>
+                    <SelectItem value="1.5 hours">1.5 hours</SelectItem>
+                    <SelectItem value="2 hours">2 hours</SelectItem>
+                    <SelectItem value="3 hours">3 hours</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <Button
-                variant="outline"
-                onClick={() => setIsAddingRehearsal(false)}
-              >
-                Cancel
-              </Button>
-              <Button onClick={scheduleRehearsal}>
-                <Check className="h-4 w-4 mr-2" /> Schedule Rehearsal
-              </Button>
-            </div>
-          </Modal>
 
-          {/* Scheduled Rehearsals List */}
-          <div className="mt-8">
-            <h3 className="text-lg font-semibold mb-4">Upcoming Rehearsals</h3>
-            <div className="space-y-4">
-              {rehearsals.length > 0 ? (
-                rehearsals.map(rehearsal => (
-                  <Card key={rehearsal.id}>
-                    <CardHeader>
-                      <CardTitle>{rehearsal.description}</CardTitle>
-                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                        <div className="flex items-center gap-1">
-                          <Calendar className="h-4 w-4" />
-                          {new Date(rehearsal.date).toLocaleDateString('en-US', {
-                            weekday: 'short',
-                            month: 'short',
-                            day: 'numeric'
-                          })}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Clock className="h-4 w-4" />
-                          {rehearsal.time} ({rehearsal.duration})
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Users className="h-4 w-4" />
-                          {rehearsal.participants.length} attending
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <p>Location: {rehearsal.location}</p>
-                    </CardContent>
-                  </Card>
-                ))
-              ) : (
-                <p className="text-muted-foreground">No rehearsals scheduled yet</p>
-              )}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Location *
+              </label>
+              <Input
+                name="location"
+                value={newRehearsal.location}
+                onChange={handleRehearsalInputChange}
+                placeholder="Enter location"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Description
+              </label>
+              <Textarea
+                name="description"
+                value={newRehearsal.description}
+                onChange={handleRehearsalInputChange}
+                placeholder="Enter rehearsal details"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Participants ({users.length})
+              </label>
+              <div className="space-y-2 max-h-40 overflow-y-auto p-2 border rounded">
+                {users.map(user => (
+                  <div key={user.id} className="flex items-center gap-2">
+                    <div className={`h-3 w-3 rounded-full ${user.color}`} />
+                    <span>{user.name}</span>
+                    {user.instrument && (
+                      <span className="text-xs text-muted-foreground ml-auto">({user.instrument})</span>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
+          <div className="flex justify-end gap-2 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setIsAddingRehearsal(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={scheduleRehearsal}>
+              <Check className="h-4 w-4 mr-2" /> Schedule Rehearsal
+            </Button>
+          </div>
+        </Modal>
+
+        {/* Scheduled Rehearsals List */}
+        <div className="mt-8">
+          <h3 className="text-lg font-semibold mb-4">Upcoming Rehearsals</h3>
+          <div className="space-y-4">
+            {rehearsals.length > 0 ? (
+              rehearsals.map(rehearsal => (
+                <Card key={rehearsal.id}>
+                  <CardHeader>
+                    <CardTitle>{rehearsal.description}</CardTitle>
+                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        <Calendar className="h-4 w-4" />
+                        {new Date(rehearsal.date).toLocaleDateString('en-US', {
+                          weekday: 'short',
+                          month: 'short',
+                          day: 'numeric'
+                        })}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-4 w-4" />
+                        {rehearsal.time} ({rehearsal.duration})
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Users className="h-4 w-4" />
+                        {rehearsal.participants.length} attending
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p>Location: {rehearsal.location}</p>
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <p className="text-muted-foreground">No rehearsals scheduled yet</p>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  </div>
+);
 }
