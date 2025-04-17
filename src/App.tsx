@@ -1,185 +1,190 @@
-import { useState, useRef, useEffect } from 'react'
-import { Calendar, Clock, Users, User, Plus, X, Check, Edit, Trash, Lock, CheckCircle } from 'lucide-react'
-import { Button } from "/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "/components/ui/card"
-import { Input } from "/components/ui/input"
-import { Textarea } from "/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "/components/ui/select"
+import { useState, useRef } from 'react';
+import { Calendar, Clock, Users, User, Plus, X, Check, Edit, Trash, Lock, CheckCircle } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-type User = {
-  id: string
-  name: string
-  email: string
-  instrument: string
-  color: string
-}
+type UserType = {
+  id: string;
+  name: string;
+  email: string;
+  instrument: string;
+  color: string;
+};
 
 type Availability = {
-  userId: string
-  date: string
-  status: 'available' | 'unavailable' | 'maybe'
-  notes: string
-}
+  userId: string;
+  date: string;
+  status: 'available' | 'unavailable' | 'maybe';
+  notes: string;
+};
 
 type Rehearsal = {
-  id: string
-  date: string
-  time: string
-  duration: string
-  location: string
-  description: string
-  participants: string[]
-}
+  id: string;
+  date: string;
+  time: string;
+  duration: string;
+  location: string;
+  description: string;
+  participants: string[];
+};
 
 export default function FixedDragScheduler() {
-  const [currentMonth, setCurrentMonth] = useState(new Date())
-  const [users, setUsers] = useState<User[]>([
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [users, setUsers] = useState<UserType[]>([
     { id: '1', name: 'Alice', email: 'alice@example.com', instrument: 'Violin', color: 'bg-blue-500' },
     { id: '2', name: 'Bob', email: 'bob@example.com', instrument: 'Cello', color: 'bg-green-500' },
     { id: '3', name: 'Charlie', email: 'charlie@example.com', instrument: 'Piano', color: 'bg-purple-500' },
-  ])
-  const [availabilities, setAvailabilities] = useState<Availability[]>([])
-  const [rehearsals, setRehearsals] = useState<Rehearsal[]>([])
-  const [isAddingRehearsal, setIsAddingRehearsal] = useState(false)
-  const [isManagingTeam, setIsManagingTeam] = useState(false)
-  const [editingUser, setEditingUser] = useState<User | null>(null)
+  ]);
+  const [availabilities, setAvailabilities] = useState<Availability[]>([]);
+  const [rehearsals, setRehearsals] = useState<Rehearsal[]>([]);
+  const [isAddingRehearsal, setIsAddingRehearsal] = useState(false);
+  const [isManagingTeam, setIsManagingTeam] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserType | null>(null);
   const [newUser, setNewUser] = useState({
     name: '',
     email: '',
     instrument: ''
-  })
-  const [errors, setErrors] = useState<Record<string, string>>({})
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [newRehearsal, setNewRehearsal] = useState({
     date: '',
     time: '18:00',
     duration: '2 hours',
     location: '',
     description: ''
-  })
+  });
 
   // Drag selection state
-  const [currentUser, setCurrentUser] = useState<string>('')
-  const [markingMode, setMarkingMode] = useState<'available' | 'unavailable'>('available')
-  const [isDragging, setIsDragging] = useState(false)
-  const [dragStartDate, setDragStartDate] = useState<Date | null>(null)
-  const [dragEndDate, setDragEndDate] = useState<Date | null>(null)
-  const calendarRef = useRef<HTMLDivElement>(null)
+  const [currentUser, setCurrentUser] = useState<string>('');
+  const [markingMode, setMarkingMode] = useState<'available' | 'unavailable'>('available');
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartDate, setDragStartDate] = useState<Date | null>(null);
+  const [dragEndDate, setDragEndDate] = useState<Date | null>(null);
+  const calendarRef = useRef<HTMLDivElement>(null);
+
+  // Helper function to format dates as YYYY-MM-DD
+  const formatDate = (date: Date): string => {
+    return date.toISOString().split('T')[0];
+  };
 
   // Generate days for the current month view
   const getDaysInMonth = (year: number, month: number) => {
-    const date = new Date(year, month, 1)
-    const days = []
+    const date = new Date(year, month, 1);
+    const days = [];
     
     while (date.getMonth() === month) {
-      days.push(new Date(date))
-      date.setDate(date.getDate() + 1)
+      days.push(new Date(date));
+      date.setDate(date.getDate() + 1);
     }
     
-    return days
-  }
+    return days;
+  };
 
   const daysInMonth = getDaysInMonth(
     currentMonth.getFullYear(),
     currentMonth.getMonth()
-  )
+  );
 
-  // Handle month navigation - FIXED: Create new Date objects
+  // Handle month navigation
   const prevMonth = () => {
     setCurrentMonth(new Date(
       currentMonth.getFullYear(),
       currentMonth.getMonth() - 1,
       1
-    ))
-  }
+    ));
+  };
 
   const nextMonth = () => {
     setCurrentMonth(new Date(
       currentMonth.getFullYear(),
       currentMonth.getMonth() + 1,
       1
-    ))
-  }
+    ));
+  };
 
   // Validate user input
-  const validateUser = (user: Partial<User>) => {
-    const newErrors: Record<string, string> = {}
-    if (!user.name?.trim()) newErrors.name = 'Name is required'
-    if (user.email && !/^\S+@\S+\.\S+$/.test(user.email)) newErrors.email = 'Invalid email format'
-    return newErrors
-  }
+  const validateUser = (user: Partial<UserType>) => {
+    const newErrors: Record<string, string> = {};
+    if (!user.name?.trim()) newErrors.name = 'Name is required';
+    if (user.email && !/^\S+@\S+\.\S+$/.test(user.email)) newErrors.email = 'Invalid email format';
+    return newErrors;
+  };
 
   // Add a new user
   const addUser = () => {
-    const validationErrors = validateUser(newUser)
+    const validationErrors = validateUser(newUser);
     if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors)
-      return
+      setErrors(validationErrors);
+      return;
     }
 
-    const colors = ['bg-red-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500']
-    const addedUser: User = {
+    const colors = ['bg-red-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500'];
+    const addedUser: UserType = {
       id: Date.now().toString(),
       name: newUser.name.trim(),
       email: newUser.email.trim(),
       instrument: newUser.instrument.trim(),
       color: colors[users.length % colors.length]
-    }
+    };
 
-    setUsers([...users, addedUser])
-    setNewUser({ name: '', email: '', instrument: '' })
-    setErrors({})
-  }
+    setUsers([...users, addedUser]);
+    setNewUser({ name: '', email: '', instrument: '' });
+    setErrors({});
+  };
 
   // Edit an existing user
   const editUser = () => {
-    if (!editingUser) return
+    if (!editingUser) return;
 
-    const validationErrors = validateUser(editingUser)
+    const validationErrors = validateUser(editingUser);
     if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors)
-      return
+      setErrors(validationErrors);
+      return;
     }
 
-    setUsers(users.map(u => u.id === editingUser.id ? editingUser : u))
-    setEditingUser(null)
-    setErrors({})
-  }
+    setUsers(users.map(u => u.id === editingUser.id ? editingUser : u));
+    setEditingUser(null);
+    setErrors({});
+  };
 
   // Delete a user
   const deleteUser = (userId: string) => {
     if (window.confirm('Are you sure you want to delete this team member?')) {
-      setUsers(users.filter(u => u.id !== userId))
-      setAvailabilities(availabilities.filter(a => a.userId !== userId))
+      setUsers(users.filter(u => u.id !== userId));
+      setAvailabilities(availabilities.filter(a => a.userId !== userId));
       setRehearsals(rehearsals.map(r => ({
         ...r,
         participants: r.participants.filter(p => p !== userId)
-      })))
+      })));
     }
-  }
+  };
 
   // Get availability for a user on a specific date
   const getUserAvailability = (userId: string, date: Date) => {
-    const dateStr = date.toISOString().split('T')[0]
-    return availabilities.find(a => a.userId === userId && a.date === dateStr)
-  }
+    const dateStr = formatDate(date);
+    return availabilities.find(a => a.userId === userId && a.date === dateStr);
+  };
 
   // Check if a date has a rehearsal scheduled
   const hasRehearsal = (date: Date) => {
-    const dateStr = date.toISOString().split('T')[0]
-    return rehearsals.some(r => r.date === dateStr)
-  }
+    const dateStr = formatDate(date);
+    return rehearsals.some(r => r.date === dateStr);
+  };
 
   // Get rehearsal details for a date
   const getRehearsal = (date: Date) => {
-    const dateStr = date.toISOString().split('T')[0]
-    return rehearsals.find(r => r.date === dateStr)
-  }
+    const dateStr = formatDate(date);
+    return rehearsals.find(r => r.date === dateStr);
+  };
 
   // Schedule a new rehearsal
   const scheduleRehearsal = () => {
     if (!newRehearsal.date || !newRehearsal.time || !newRehearsal.location) {
-      alert('Please fill in all required fields')
-      return
+      alert('Please fill in all required fields');
+      return;
     }
 
     const newRehearsalEntry: Rehearsal = {
@@ -189,104 +194,101 @@ export default function FixedDragScheduler() {
       duration: newRehearsal.duration,
       location: newRehearsal.location,
       description: newRehearsal.description,
-      participants: users.map(u => u.id) // Default to all users
-    }
+      participants: users.map(u => u.id)
+    };
 
-    setRehearsals([...rehearsals, newRehearsalEntry])
+    setRehearsals([...rehearsals, newRehearsalEntry]);
     setNewRehearsal({
       date: '',
       time: '18:00',
       duration: '2 hours',
       location: '',
       description: ''
-    })
-    setIsAddingRehearsal(false)
-  }
+    });
+    setIsAddingRehearsal(false);
+  };
 
-  // Drag selection handlers - FIXED: Create new Date objects instead of modifying
+  // Drag selection handlers
   const handleDragStart = (date: Date) => {
-    if (!currentUser) return
-    setIsDragging(true)
-    setDragStartDate(new Date(date))
-    setDragEndDate(new Date(date))
-  }
+    if (!currentUser) return;
+    setIsDragging(true);
+    setDragStartDate(new Date(date));
+    setDragEndDate(new Date(date));
+  };
 
   const handleDragEnter = (date: Date) => {
-    if (!isDragging || !dragStartDate) return
-    setDragEndDate(new Date(date))
-  }
+    if (!isDragging || !dragStartDate) return;
+    setDragEndDate(new Date(date));
+  };
 
   const handleDragEnd = () => {
     if (!isDragging || !dragStartDate || !dragEndDate || !currentUser) {
-      setIsDragging(false)
-      return
+      setIsDragging(false);
+      return;
     }
 
     // Sort dates chronologically
-    const start = dragStartDate < dragEndDate ? new Date(dragStartDate) : new Date(dragEndDate)
-    const end = dragStartDate < dragEndDate ? new Date(dragEndDate) : new Date(dragStartDate)
+    const start = dragStartDate < dragEndDate ? new Date(dragStartDate) : new Date(dragEndDate);
+    const end = dragStartDate < dragEndDate ? new Date(dragEndDate) : new Date(dragStartDate);
 
     // Create new availabilities for each day in range
-    const newAvailabilities: Availability[] = []
-    const currentDate = new Date(start)
+    const newAvailabilities: Availability[] = [];
+    const currentDate = new Date(start);
     
     while (currentDate <= end) {
-      const dateStr = currentDate.toISOString().split('T')[0]
+      const dateStr = formatDate(currentDate);
       
       // Remove any existing availability for this user/date
       const existingIndex = availabilities.findIndex(
         a => a.userId === currentUser && a.date === dateStr
-      )
+      );
 
       if (existingIndex >= 0) {
-        // Update existing - FIXED: Create new array instead of modifying
-        const updated = [...availabilities]
+        const updated = [...availabilities];
         updated[existingIndex] = {
           ...updated[existingIndex],
           status: markingMode
-        }
-        setAvailabilities(updated)
+        };
+        setAvailabilities(updated);
       } else {
-        // Add new
         newAvailabilities.push({
           userId: currentUser,
           date: dateStr,
           status: markingMode,
           notes: ''
-        })
+        });
       }
 
-      // FIXED: Create new Date instead of modifying
-      currentDate.setDate(currentDate.getDate() + 1)
+      currentDate.setDate(currentDate.getDate() + 1);
     }
 
     if (newAvailabilities.length > 0) {
-      setAvailabilities([...availabilities, ...newAvailabilities])
+      setAvailabilities([...availabilities, ...newAvailabilities]);
     }
 
-    setIsDragging(false)
-    setDragStartDate(null)
-    setDragEndDate(null)
-  }
+    setIsDragging(false);
+    setDragStartDate(null);
+    setDragEndDate(null);
+  };
 
   // Check if a date is in the current drag selection
   const isDateInDragSelection = (date: Date) => {
-    if (!isDragging || !dragStartDate || !dragEndDate) return false
+    if (!isDragging || !dragStartDate || !dragEndDate) return false;
 
-    const start = dragStartDate < dragEndDate ? dragStartDate : dragEndDate
-    const end = dragStartDate < dragEndDate ? dragEndDate : dragStartDate
+    const start = dragStartDate < dragEndDate ? dragStartDate : dragEndDate;
+    const end = dragStartDate < dragEndDate ? dragEndDate : dragStartDate;
 
-    return date >= start && date <= end && date.getMonth() === currentMonth.getMonth()
-  }
+    return date >= start && date <= end && date.getMonth() === currentMonth.getMonth();
+  };
 
   // Custom Modal Component
   const Modal = ({ isOpen, onClose, children, title }: {
-    isOpen: boolean
-    onClose: () => void
-    children: React.ReactNode
-    title: string
+    isOpen: boolean;
+    onClose: () => void;
+    children: React.ReactNode;
+    title: string;
   }) => {
-    if (!isOpen) return null
+    if (!isOpen) return null;
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -304,8 +306,8 @@ export default function FixedDragScheduler() {
           </CardContent>
         </Card>
       </div>
-    )
-  }
+    );
+  };
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -412,26 +414,25 @@ export default function FixedDragScheduler() {
 
             {/* Calendar days */}
             {daysInMonth.map((day, index) => {
-              const dateStr = day.toISOString().split('T')[0]
-              const rehearsal = getRehearsal(day)
-              const isRehearsal = hasRehearsal(day)
-              const userAvailability = currentUser ? getUserAvailability(currentUser, day) : null
-              const isInDragSelection = isDateInDragSelection(day)
+              const rehearsal = getRehearsal(day);
+              const isRehearsal = hasRehearsal(day);
+              const userAvailability = currentUser ? getUserAvailability(currentUser, day) : null;
+              const isInDragSelection = isDateInDragSelection(day);
 
               // Determine cell appearance
-              let cellAppearance = 'bg-muted'
+              let cellAppearance = 'bg-muted';
               if (isInDragSelection) {
                 cellAppearance = markingMode === 'available' 
                   ? 'bg-green-100 border-green-300' 
-                  : 'bg-red-100 border-red-300'
+                  : 'bg-red-100 border-red-300';
               } else if (isRehearsal) {
-                cellAppearance = 'bg-blue-50 border-blue-200'
+                cellAppearance = 'bg-blue-50 border-blue-200';
               } else if (userAvailability) {
                 cellAppearance = userAvailability.status === 'available' 
                   ? 'bg-green-50 border-green-200' 
                   : userAvailability.status === 'unavailable' 
                     ? 'bg-red-50 border-red-200' 
-                    : 'bg-yellow-50 border-yellow-200'
+                    : 'bg-yellow-50 border-yellow-200';
               }
 
               return (
@@ -456,7 +457,7 @@ export default function FixedDragScheduler() {
                   {/* User availability indicators */}
                   <div className="mt-2 space-y-1">
                     {users.map(user => {
-                      const availability = getUserAvailability(user.id, day)
+                      const availability = getUserAvailability(user.id, day);
                       return (
                         <div key={user.id} className="flex items-center gap-1">
                           <div className={`h-2 w-2 rounded-full ${user.color}`} />
@@ -470,11 +471,11 @@ export default function FixedDragScheduler() {
                               : '-'}
                           </span>
                         </div>
-                      )
+                      );
                     })}
                   </div>
                 </div>
-              )
+              );
             })}
           </div>
 
@@ -502,8 +503,8 @@ export default function FixedDragScheduler() {
           <Modal
             isOpen={isManagingTeam}
             onClose={() => {
-              setIsManagingTeam(false)
-              setEditingUser(null)
+              setIsManagingTeam(false);
+              setEditingUser(null);
             }}
             title="Manage Team Members"
           >
@@ -565,8 +566,8 @@ export default function FixedDragScheduler() {
                     <Button
                       variant="outline"
                       onClick={() => {
-                        setEditingUser(null)
-                        setErrors({})
+                        setEditingUser(null);
+                        setErrors({});
                       }}
                     >
                       Cancel
@@ -772,5 +773,5 @@ export default function FixedDragScheduler() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
