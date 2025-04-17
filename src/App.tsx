@@ -34,9 +34,10 @@ type Rehearsal = {
 export default function RehearsalScheduler() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [users, setUsers] = useState<UserType[]>([
-    { id: '1', name: 'Alice', email: 'alice@example.com', instrument: 'Violin', color: 'bg-blue-500' },
-    { id: '2', name: 'Bob', email: 'bob@example.com', instrument: 'Cello', color: 'bg-green-500' },
-    { id: '3', name: 'Charlie', email: 'charlie@example.com', instrument: 'Piano', color: 'bg-purple-500' },
+    { id: '1', name: 'Robin', email: 'rjlmoir@gmail.com', instrument: 'Stage Manager', color: 'bg-blue-500' },
+    { id: '2', name: 'Kate', email: 'kate.johnston54@gmail.com', instrument: 'Director', color: 'bg-green-500' },
+    { id: '3', name: 'Lisa', email: 'lrandall223@gmail.com', instrument: 'Sister Sophia', color: 'bg-purple-500' },
+    { id: '4', name: 'Jonathan', email: 'jonathaniscarroll@gmail.com', instrument: 'Tech', color: 'bg-red-500' },
   ]);
   const [availabilities, setAvailabilities] = useState<Availability[]>([]);
   const [rehearsals, setRehearsals] = useState<Rehearsal[]>([]);
