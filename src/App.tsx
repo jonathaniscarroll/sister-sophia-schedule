@@ -31,7 +31,7 @@ type Rehearsal = {
   participants: string[];
 };
 
-export default function FixedDragScheduler() {
+export default function RehearsalScheduler() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [users, setUsers] = useState<UserType[]>([
     { id: '1', name: 'Alice', email: 'alice@example.com', instrument: 'Violin', color: 'bg-blue-500' },
@@ -70,14 +70,31 @@ export default function FixedDragScheduler() {
     return date.toISOString().split('T')[0];
   };
 
-  // Generate days for the current month view
+  // Fixed calendar generation function
   const getDaysInMonth = (year: number, month: number) => {
-    const date = new Date(year, month, 1);
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const firstDayOfWeek = firstDay.getDay();
+    const daysFromPrevMonth = firstDayOfWeek;
+    const totalDays = lastDay.getDate();
+    const daysFromNextMonth = (6 - lastDay.getDay()) % 7;
+    
     const days = [];
     
-    while (date.getMonth() === month) {
-      days.push(new Date(date));
-      date.setDate(date.getDate() + 1);
+    // Previous month days
+    const prevMonthLastDay = new Date(year, month, 0).getDate();
+    for (let i = daysFromPrevMonth - 1; i >= 0; i--) {
+      days.push(new Date(year, month - 1, prevMonthLastDay - i));
+    }
+    
+    // Current month days
+    for (let i = 1; i <= totalDays; i++) {
+      days.push(new Date(year, month, i));
+    }
+    
+    // Next month days
+    for (let i = 1; i <= daysFromNextMonth; i++) {
+      days.push(new Date(year, month + 1, i));
     }
     
     return days;
@@ -206,6 +223,30 @@ export default function FixedDragScheduler() {
       description: ''
     });
     setIsAddingRehearsal(false);
+  };
+
+  // Input change handlers
+  const handleRehearsalInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setNewRehearsal(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleUserInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    if (editingUser) {
+      setEditingUser({
+        ...editingUser,
+        [name]: value
+      });
+    } else {
+      setNewUser({
+        ...newUser,
+        [name]: value
+      });
+    }
   };
 
   // Drag selection handlers
@@ -520,12 +561,9 @@ export default function FixedDragScheduler() {
                       Name *
                     </label>
                     <Input
+                      name="name"
                       value={editingUser?.name || newUser.name}
-                      onChange={(e) => 
-                        editingUser
-                          ? setEditingUser({...editingUser, name: e.target.value})
-                          : setNewUser({...newUser, name: e.target.value})
-                      }
+                      onChange={handleUserInputChange}
                       placeholder="Full name"
                     />
                     {errors.name && <p className="text-sm text-red-500 mt-1">{errors.name}</p>}
@@ -535,12 +573,9 @@ export default function FixedDragScheduler() {
                       Email
                     </label>
                     <Input
+                      name="email"
                       value={editingUser?.email || newUser.email}
-                      onChange={(e) => 
-                        editingUser
-                          ? setEditingUser({...editingUser, email: e.target.value})
-                          : setNewUser({...newUser, email: e.target.value})
-                      }
+                      onChange={handleUserInputChange}
                       placeholder="Email address"
                       type="email"
                     />
@@ -551,12 +586,9 @@ export default function FixedDragScheduler() {
                       Instrument
                     </label>
                     <Input
+                      name="instrument"
                       value={editingUser?.instrument || newUser.instrument}
-                      onChange={(e) => 
-                        editingUser
-                          ? setEditingUser({...editingUser, instrument: e.target.value})
-                          : setNewUser({...newUser, instrument: e.target.value})
-                      }
+                      onChange={handleUserInputChange}
                       placeholder="Primary instrument"
                     />
                   </div>
@@ -643,8 +675,9 @@ export default function FixedDragScheduler() {
                 </label>
                 <Input
                   type="date"
+                  name="date"
                   value={newRehearsal.date}
-                  onChange={(e) => setNewRehearsal({...newRehearsal, date: e.target.value})}
+                  onChange={handleRehearsalInputChange}
                 />
               </div>
 
@@ -655,8 +688,9 @@ export default function FixedDragScheduler() {
                   </label>
                   <Input
                     type="time"
+                    name="time"
                     value={newRehearsal.time}
-                    onChange={(e) => setNewRehearsal({...newRehearsal, time: e.target.value})}
+                    onChange={handleRehearsalInputChange}
                   />
                 </div>
                 <div>
@@ -685,8 +719,9 @@ export default function FixedDragScheduler() {
                   Location *
                 </label>
                 <Input
+                  name="location"
                   value={newRehearsal.location}
-                  onChange={(e) => setNewRehearsal({...newRehearsal, location: e.target.value})}
+                  onChange={handleRehearsalInputChange}
                   placeholder="Enter location"
                 />
               </div>
@@ -696,8 +731,9 @@ export default function FixedDragScheduler() {
                   Description
                 </label>
                 <Textarea
+                  name="description"
                   value={newRehearsal.description}
-                  onChange={(e) => setNewRehearsal({...newRehearsal, description: e.target.value})}
+                  onChange={handleRehearsalInputChange}
                   placeholder="Enter rehearsal details"
                 />
               </div>
