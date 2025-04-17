@@ -42,18 +42,16 @@ async function fetchRedisData(key: string): Promise<any> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ key }),
-      credentials: 'same-origin',
     });
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    const data = await response.json();
-    return data.value || [];
+    return await response.json();
   } catch (error) {
     console.error('Error fetching Redis data:', error);
-    return [];
+    return null;
   }
 }
 
@@ -65,7 +63,6 @@ async function saveRedisData(key: string, value: any): Promise<void> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ key, value }),
-      credentials: 'same-origin',
     });
 
     if (!response.ok) {
@@ -75,6 +72,7 @@ async function saveRedisData(key: string, value: any): Promise<void> {
     console.error('Error saving to Redis:', error);
   }
 }
+
 
 export default function RehearsalScheduler() {
   // State
