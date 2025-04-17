@@ -33,6 +33,7 @@ type Rehearsal = {
 };
 
 // Redis API helpers
+// Redis API helpers
 async function fetchRedisData(key: string): Promise<any> {
   try {
     const response = await fetch('/api/redis/get', {
@@ -41,7 +42,13 @@ async function fetchRedisData(key: string): Promise<any> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ key }),
+      credentials: 'same-origin',
     });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
     const data = await response.json();
     return data.value || [];
   } catch (error) {
@@ -52,13 +59,18 @@ async function fetchRedisData(key: string): Promise<any> {
 
 async function saveRedisData(key: string, value: any): Promise<void> {
   try {
-    await fetch('/api/redis/set', {
+    const response = await fetch('/api/redis/set', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ key, value }),
+      credentials: 'same-origin',
     });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
   } catch (error) {
     console.error('Error saving to Redis:', error);
   }
