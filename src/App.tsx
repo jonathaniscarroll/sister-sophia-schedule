@@ -329,19 +329,19 @@ export default function RehearsalScheduler() {
   };
 
   // User management
-  const validateUser = (user: Partial<UserType>) => {
-    const newErrors: Record<string, string> = {};
-    if (!user.name?.trim()) newErrors.name = 'Name is required';
-    if (user.email && !/^\S+@\S+\.\S+$/.test(user.email)) newErrors.email = 'Invalid email format';
-    return newErrors;
-  };
+  // const validateUser = (user: Partial<UserType>) => {
+  //   const newErrors: Record<string, string> = {};
+  //   if (!user.name?.trim()) newErrors.name = 'Name is required';
+  //   if (user.email && !/^\S+@\S+\.\S+$/.test(user.email)) newErrors.email = 'Invalid email format';
+  //   return newErrors;
+  // };
 
-  const addUser = async () => {
-    const validationErrors = validateUser(newUser);
-    if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors);
-      return;
-    }
+  // const addUser = async () => {
+  //   const validationErrors = validateUser(newUser);
+  //   if (Object.keys(validationErrors).length > 0) {
+  //     setErrors(validationErrors);
+  //     return;
+  //   }
 
     const colors = ['bg-red-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500'];
     const addedUser: UserType = {
@@ -357,30 +357,30 @@ export default function RehearsalScheduler() {
     setErrors({});
   };
 
-  const editUser = async () => {
-    if (!editingUser) return;
+  // const editUser = async () => {
+  //   if (!editingUser) return;
 
-    const validationErrors = validateUser(editingUser);
-    if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors);
-      return;
-    }
+  //   const validationErrors = validateUser(editingUser);
+  //   if (Object.keys(validationErrors).length > 0) {
+  //     setErrors(validationErrors);
+  //     return;
+  //   }
 
-    setUsers(users.map(u => u.id === editingUser.id ? editingUser : u));
-    setEditingUser(null);
-    setErrors({});
-  };
+  //   setUsers(users.map(u => u.id === editingUser.id ? editingUser : u));
+  //   setEditingUser(null);
+  //   setErrors({});
+  // };
 
-  const deleteUser = async (userId: string) => {
-    if (window.confirm('Are you sure you want to delete this team member?')) {
-      setUsers(users.filter(u => u.id !== userId));
-      setAvailabilities(availabilities.filter(a => a.userId !== userId));
-      setRehearsals(rehearsals.map(r => ({
-        ...r,
-        participants: r.participants.filter(p => p !== userId)
-      })));
-    }
-  };
+  // const deleteUser = async (userId: string) => {
+  //   if (window.confirm('Are you sure you want to delete this team member?')) {
+  //     setUsers(users.filter(u => u.id !== userId));
+  //     setAvailabilities(availabilities.filter(a => a.userId !== userId));
+  //     setRehearsals(rehearsals.map(r => ({
+  //       ...r,
+  //       participants: r.participants.filter(p => p !== userId)
+  //     })));
+  //   }
+  // };
 
   // Rehearsal management
   const getUserAvailability = (userId: string, date: Date) => {
@@ -398,11 +398,11 @@ export default function RehearsalScheduler() {
     return rehearsals.find(r => r.date === dateStr);
   };
 
-  const scheduleRehearsal = async () => {
-    if (!newRehearsal.date || !newRehearsal.time || !newRehearsal.location) {
-      alert('Please fill in all required fields');
-      return;
-    }
+  // const scheduleRehearsal = async () => {
+  //   if (!newRehearsal.date || !newRehearsal.time || !newRehearsal.location) {
+  //     alert('Please fill in all required fields');
+  //     return;
+  //   }
 
     const newRehearsalEntry: Rehearsal = {
       id: Date.now().toString(),
