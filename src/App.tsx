@@ -343,19 +343,19 @@ export default function RehearsalScheduler() {
   //     return;
   //   }
 
-    const colors = ['bg-red-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500'];
-    const addedUser: UserType = {
-      id: Date.now().toString(),
-      name: newUser.name.trim(),
-      email: newUser.email.trim(),
-      instrument: newUser.instrument.trim(),
-      color: colors[users.length % colors.length]
-    };
+  //   const colors = ['bg-red-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500'];
+  //   const addedUser: UserType = {
+  //     id: Date.now().toString(),
+  //     name: newUser.name.trim(),
+  //     email: newUser.email.trim(),
+  //     instrument: newUser.instrument.trim(),
+  //     color: colors[users.length % colors.length]
+  //   };
 
-    setUsers([...users, addedUser]);
-    setNewUser({ name: '', email: '', instrument: '' });
-    setErrors({});
-  };
+  //   setUsers([...users, addedUser]);
+  //   setNewUser({ name: '', email: '', instrument: '' });
+  //   setErrors({});
+  // };
 
   // const editUser = async () => {
   //   if (!editingUser) return;
@@ -404,26 +404,26 @@ export default function RehearsalScheduler() {
   //     return;
   //   }
 
-    const newRehearsalEntry: Rehearsal = {
-      id: Date.now().toString(),
-      date: newRehearsal.date,
-      time: newRehearsal.time,
-      duration: newRehearsal.duration,
-      location: newRehearsal.location,
-      description: newRehearsal.description,
-      participants: users.map(u => u.id)
-    };
+  //   const newRehearsalEntry: Rehearsal = {
+  //     id: Date.now().toString(),
+  //     date: newRehearsal.date,
+  //     time: newRehearsal.time,
+  //     duration: newRehearsal.duration,
+  //     location: newRehearsal.location,
+  //     description: newRehearsal.description,
+  //     participants: users.map(u => u.id)
+  //   };
 
-    setRehearsals([...rehearsals, newRehearsalEntry]);
-    setNewRehearsal({
-      date: '',
-      time: '18:00',
-      duration: '2 hours',
-      location: '',
-      description: ''
-    });
-    setIsAddingRehearsal(false);
-  };
+  //   setRehearsals([...rehearsals, newRehearsalEntry]);
+  //   setNewRehearsal({
+  //     date: '',
+  //     time: '18:00',
+  //     duration: '2 hours',
+  //     location: '',
+  //     description: ''
+  //   });
+  //   setIsAddingRehearsal(false);
+  // };
 
   // Drag selection
   const handleRehearsalInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
