@@ -1,202 +1,310 @@
-import { useState, useEffect, useRef } from 'react';
-import { Calendar, Clock, Users, User, Plus, X, Check, Edit, Trash, Lock, CheckCircle } from 'lucide-react';
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useState, useEffect, useRef } from 'react'
+import { Calendar, Clock, Users, User, Plus, X, Check, Edit, Trash, Lock, CheckCircle } from 'lucide-react'
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useAuthState } from 'react-firebase-hooks/auth'
+import { useCollection, useDocument } from 'react-firebase-hooks/firestore'
+import { auth, db } from '@/lib/firebase-config'
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  getDoc,
+  getDocs,
+  query,
+  where,
+  onSnapshot
+} from 'firebase/firestore'
+import { signInWithPopup, signOut } from 'firebase/auth'
 
 // Types
 type UserType = {
-  id: string;
-  name: string;
-  email: string;
-  instrument: string;
-  color: string;
-};
+  id: string
+  name: string
+  email: string
+  instrument: string
+  color: string
+}
 
 type Availability = {
-  userId: string;
-  date: string;
-  status: 'available' | 'unavailable' | 'maybe';
-  notes: string;
-};
+  userId: string
+  date: string
+  status: 'available' | 'unavailable' | 'maybe'
+  notes: string
+}
 
 type Rehearsal = {
-  id: string;
-  date: string;
-  time: string;
-  duration: string;
-  location: string;
-  description: string;
-  participants: string[];
-};
-
-// Redis API helpers
-// Redis API helpers
-async function fetchRedisData(key: string): Promise<any> {
-  try {
-    const response = await fetch('/api/redis/get', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ key }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching Redis data:', error);
-    return null;
-  }
+  id: string
+  date: string
+  time: string
+  duration: string
+  location: string
+  description: string
+  participants: string[]
 }
-
-async function saveRedisData(key: string, value: any): Promise<void> {
-  try {
-    const response = await fetch('/api/redis/set', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ key, value }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-  } catch (error) {
-    console.error('Error saving to Redis:', error);
-  }
-}
-
 
 export default function RehearsalScheduler() {
-  // State
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [users, setUsers] = useState<UserType[]>([]);
-  const [availabilities, setAvailabilities] = useState<Availability[]>([]);
-  const [rehearsals, setRehearsals] = useState<Rehearsal[]>([]);
-  const [isAddingRehearsal, setIsAddingRehearsal] = useState(false);
-  const [isManagingTeam, setIsManagingTeam] = useState(false);
-  const [editingUser, setEditingUser] = useState<UserType | null>(null);
+  // Authentication
+  const [user, loadingAuth, errorAuth] = useAuthState(auth)
+  
+  // Firestore data
+  const [users, setUsers] = useState<UserType[]>([])
+  const [availabilities, setAvailabilities] = useState<Availability[]>([])
+  const [rehearsals, setRehearsals] = useState<Rehearsal[]>([])
+  
+  // UI state
+  const [currentMonth, setCurrentMonth] = useState(new Date())
+  const [isAddingRehearsal, setIsAddingRehearsal] = useState(false)
+  const [isManagingTeam, setIsManagingTeam] = useState(false)
+  const [editingUser, setEditingUser] = useState<UserType | null>(null)
   const [newUser, setNewUser] = useState({
     name: '',
     email: '',
     instrument: ''
-  });
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  })
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [newRehearsal, setNewRehearsal] = useState({
     date: '',
     time: '18:00',
     duration: '2 hours',
     location: '',
     description: ''
-  });
-  const [currentUser, setCurrentUser] = useState<string>('');
-  const [markingMode, setMarkingMode] = useState<'available' | 'unavailable'>('available');
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStartDate, setDragStartDate] = useState<Date | null>(null);
-  const [dragEndDate, setDragEndDate] = useState<Date | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const calendarRef = useRef<HTMLDivElement>(null);
+  })
+  const [markingMode, setMarkingMode] = useState<'available' | 'unavailable'>('available')
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragStartDate, setDragStartDate] = useState<Date | null>(null)
+  const [dragEndDate, setDragEndDate] = useState<Date | null>(null)
+  const calendarRef = useRef<HTMLDivElement>(null)
 
-  // Load data from Redis on mount
+  // Load data from Firestore
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [usersData, availabilitiesData, rehearsalsData] = await Promise.all([
-          fetchRedisData('users'),
-          fetchRedisData('availabilities'),
-          fetchRedisData('rehearsals')
-        ]);
+    if (!user) return
 
-        // Set initial users if none exist
-        const initialUsers = usersData.length > 0 ? usersData : [
-          { id: '1', name: 'Robin', email: 'rjlmoir@gmail.com', instrument: 'Stage Manager', color: 'bg-blue-500' },
-          { id: '2', name: 'Kate', email: 'kate.johnston54@gmail.com', instrument: 'Director', color: 'bg-green-500' },
-          { id: '3', name: 'Lisa', email: 'lrandall223@gmail.com', instrument: 'Sister Sophia', color: 'bg-purple-500' },
-          { id: '4', name: 'Jonathan', email: 'jonathaniscarroll@gmail.com', instrument: 'Tech', color: 'bg-red-500' },
-        ];
+    // Load users
+    const usersUnsub = onSnapshot(collection(db, 'users'), (snapshot) => {
+      const usersData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as UserType[]
+      setUsers(usersData)
+    })
 
-        setUsers(initialUsers);
-        setAvailabilities(availabilitiesData);
-        setRehearsals(rehearsalsData);
-        setIsLoading(false);
-
-        // Save initial users if none existed
-        if (usersData.length === 0) {
-          await saveRedisData('users', initialUsers);
-        }
-      } catch (error) {
-        console.error("Failed to load data:", error);
-        setIsLoading(false);
+    // Load availabilities
+    const availabilitiesUnsub = onSnapshot(
+      query(collection(db, 'availabilities'), where('userId', '==', user.uid)),
+      (snapshot) => {
+        const availabilitiesData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Availability[]
+        setAvailabilities(availabilitiesData)
       }
-    };
+    )
 
-    loadData();
+    // Load rehearsals
+    const rehearsalsUnsub = onSnapshot(collection(db, 'rehearsals'), (snapshot) => {
+      const rehearsalsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Rehearsal[]
+      setRehearsals(rehearsalsData)
+    })
 
-    // Set up polling for real-time updates (every 5 seconds)
-    const interval = setInterval(loadData, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      usersUnsub()
+      availabilitiesUnsub()
+      rehearsalsUnsub()
+    }
+  }, [user])
 
-  // Save data to Redis whenever it changes
+  // Initialize with default users if none exist
   useEffect(() => {
-    if (isLoading) return;
+    if (!user || users.length > 0) return
 
-    const saveData = async () => {
-      try {
-        await Promise.all([
-          saveRedisData('users', users),
-          saveRedisData('availabilities', availabilities),
-          saveRedisData('rehearsals', rehearsals)
-        ]);
-      } catch (error) {
-        console.error("Failed to save data:", error);
+    const initializeDefaultUsers = async () => {
+      const defaultUsers = [
+        { id: '1', name: 'Robin', email: 'rjlmoir@gmail.com', instrument: 'Stage Manager', color: 'bg-blue-500' },
+        { id: '2', name: 'Kate', email: 'kate.johnston54@gmail.com', instrument: 'Director', color: 'bg-green-500' },
+        { id: '3', name: 'Lisa', email: 'lrandall223@gmail.com', instrument: 'Sister Sophia', color: 'bg-purple-500' },
+        { id: '4', name: 'Jonathan', email: 'jonathaniscarroll@gmail.com', instrument: 'Tech', color: 'bg-red-500' },
+      ]
+
+      const batchWrites = defaultUsers.map(user => 
+        setDoc(doc(db, 'users', user.id), user)
+      )
+
+      await Promise.all(batchWrites)
+    }
+
+    initializeDefaultUsers()
+  }, [user, users])
+
+  // Authentication handlers
+  const handleLogin = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider)
+    } catch (error) {
+      console.error('Login error:', error)
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth)
+    } catch (error) {
+      console.error('Logout error:', error)
+    }
+  }
+
+  // User management
+  const validateUser = (user: Partial<UserType>) => {
+    const newErrors: Record<string, string> = {}
+    if (!user.name?.trim()) newErrors.name = 'Name is required'
+    if (user.email && !/^\S+@\S+\.\S+$/.test(user.email)) newErrors.email = 'Invalid email format'
+    return newErrors
+  }
+
+  const addUser = async () => {
+    const validationErrors = validateUser(newUser)
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors)
+      return
+    }
+
+    const colors = ['bg-red-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500']
+    const newUserId = Date.now().toString()
+    const addedUser: UserType = {
+      id: newUserId,
+      name: newUser.name.trim(),
+      email: newUser.email.trim(),
+      instrument: newUser.instrument.trim(),
+      color: colors[users.length % colors.length]
+    }
+
+    await setDoc(doc(db, 'users', newUserId), addedUser)
+    setNewUser({ name: '', email: '', instrument: '' })
+    setErrors({})
+  }
+
+  const editUser = async () => {
+    if (!editingUser) return
+
+    const validationErrors = validateUser(editingUser)
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors)
+      return
+    }
+
+    await updateDoc(doc(db, 'users', editingUser.id), editingUser)
+    setEditingUser(null)
+    setErrors({})
+  }
+
+  const deleteUser = async (userId: string) => {
+    if (window.confirm('Are you sure you want to delete this team member?')) {
+      await deleteDoc(doc(db, 'users', userId))
+      
+      // Delete related availabilities
+      const availabilitiesQuery = query(
+        collection(db, 'availabilities'), 
+        where('userId', '==', userId)
+      )
+      const availabilitiesSnapshot = await getDocs(availabilitiesQuery)
+      const deletePromises = availabilitiesSnapshot.docs.map(doc => 
+        deleteDoc(doc.ref)
+      )
+      await Promise.all(deletePromises)
+      
+      // Remove from rehearsals
+      const rehearsalsQuery = query(
+        collection(db, 'rehearsals'),
+        where('participants', 'array-contains', userId)
+      )
+      const rehearsalsSnapshot = await getDocs(rehearsalsQuery)
+      const updatePromises = rehearsalsSnapshot.docs.map(doc =>
+        updateDoc(doc.ref, {
+          participants: doc.data().participants.filter((p: string) => p !== userId)
+        })
+      )
+      await Promise.all(updatePromises)
+    }
+  }
+
+  // Availability management
+  const updateAvailability = async (date: Date, status: 'available' | 'unavailable' | 'maybe') => {
+    if (!user) return
+
+    const dateStr = formatDate(date)
+    const existingAvailability = availabilities.find(a => 
+      a.userId === user.uid && a.date === dateStr
+    )
+
+    if (existingAvailability) {
+      await updateDoc(doc(db, 'availabilities', existingAvailability.id), {
+        status,
+        notes: ''
+      })
+    } else {
+      const newAvailability: Availability = {
+        userId: user.uid,
+        date: dateStr,
+        status,
+        notes: ''
       }
-    };
+      await setDoc(doc(collection(db, 'availabilities')), newAvailability)
+    }
+  }
 
-    const debounceTimer = setTimeout(saveData, 1000);
-    return () => clearTimeout(debounceTimer);
-  }, [users, availabilities, rehearsals, isLoading]);
+  // Rehearsal management
+  const scheduleRehearsal = async () => {
+    if (!newRehearsal.date || !newRehearsal.time || !newRehearsal.location) {
+      alert('Please fill in all required fields')
+      return
+    }
+
+    const newRehearsalEntry: Rehearsal = {
+      id: '', // Firestore will auto-generate ID
+      date: newRehearsal.date,
+      time: newRehearsal.time,
+      duration: newRehearsal.duration,
+      location: newRehearsal.location,
+      description: newRehearsal.description,
+      participants: users.map(u => u.id)
+    }
+
+    await setDoc(doc(collection(db, 'rehearsals')), newRehearsalEntry)
+    setNewRehearsal({
+      date: '',
+      time: '18:00',
+      duration: '2 hours',
+      location: '',
+      description: ''
+    })
+    setIsAddingRehearsal(false)
+  }
 
   // Helper functions
   const formatDate = (date: Date): string => {
-    return date.toISOString().split('T')[0];
-  };
+    return date.toISOString().split('T')[0]
+  }
 
   const getDaysInMonth = (year: number, month: number) => {
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const firstDayOfWeek = firstDay.getDay();
-    const daysFromPrevMonth = firstDayOfWeek;
-    const totalDays = lastDay.getDate();
-    const daysFromNextMonth = (6 - lastDay.getDay()) % 7;
+    const date = new Date(year, month, 1)
+    const days = []
     
-    const days = [];
-    
-    // Previous month days
-    const prevMonthLastDay = new Date(year, month, 0).getDate();
-    for (let i = daysFromPrevMonth - 1; i >= 0; i--) {
-      days.push(new Date(year, month - 1, prevMonthLastDay - i));
+    while (date.getMonth() === month) {
+      days.push(new Date(date))
+      date.setDate(date.getDate() + 1)
     }
     
-    // Current month days
-    for (let i = 1; i <= totalDays; i++) {
-      days.push(new Date(year, month, i));
-    }
-    
-    // Next month days
-    for (let i = 1; i <= daysFromNextMonth; i++) {
-      days.push(new Date(year, month + 1, i));
-    }
-    
-    return days;
-  };
+    return days
+  }
+
 
   const daysInMonth = getDaysInMonth(
     currentMonth.getFullYear(),
@@ -353,55 +461,47 @@ export default function RehearsalScheduler() {
     setDragEndDate(new Date(date));
   };
 
-  const handleDragEnd = () => {
+  const handleDragEnd = async () => {
     if (!isDragging || !dragStartDate || !dragEndDate || !currentUser) {
       setIsDragging(false);
       return;
     }
-
+  
     // Sort dates chronologically
     const start = dragStartDate < dragEndDate ? new Date(dragStartDate) : new Date(dragEndDate);
     const end = dragStartDate < dragEndDate ? new Date(dragEndDate) : new Date(dragStartDate);
-
-    // Create new availabilities for each day in range
-    const newAvailabilities: Availability[] = [];
+  
     const currentDate = new Date(start);
     
     while (currentDate <= end) {
       const dateStr = formatDate(currentDate);
       
-      // Remove any existing availability for this user/date
-      const existingIndex = availabilities.findIndex(
+      // Check if availability exists
+      const existingAvailability = availabilities.find(
         a => a.userId === currentUser && a.date === dateStr
       );
-
-      if (existingIndex >= 0) {
-        const updated = [...availabilities];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
+  
+      if (existingAvailability) {
+        await updateDoc(doc(db, 'availabilities', existingAvailability.id), {
           status: markingMode
-        };
-        setAvailabilities(updated);
+        });
       } else {
-        newAvailabilities.push({
+        await setDoc(doc(collection(db, 'availabilities')), {
           userId: currentUser,
           date: dateStr,
           status: markingMode,
           notes: ''
         });
       }
-
+  
       currentDate.setDate(currentDate.getDate() + 1);
     }
-
-    if (newAvailabilities.length > 0) {
-      setAvailabilities([...availabilities, ...newAvailabilities]);
-    }
-
+  
     setIsDragging(false);
     setDragStartDate(null);
     setDragEndDate(null);
   };
+  
 
   const isDateInDragSelection = (date: Date) => {
     if (!isDragging || !dragStartDate || !dragEndDate) return false;
@@ -449,6 +549,26 @@ export default function RehearsalScheduler() {
         </div>
       </div>
     );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>Rehearsal Scheduler</CardTitle>
+            <CardDescription>
+              Please sign in to access the rehearsal scheduler
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={handleLogin} className="w-full">
+              Sign in with Google
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   return (
