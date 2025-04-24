@@ -1,26 +1,21 @@
-import { useState, useEffect, useRef } from 'react'
-import { Calendar, Clock, Users, User, Plus, X, Check, Edit, Trash, Lock, CheckCircle } from 'lucide-react'
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useAuthState } from 'react-firebase-hooks/auth'
-import { useCollection, useDocument } from 'react-firebase-hooks/firestore'
+import { useState, useEffect } from 'react'
+import { format } from 'date-fns'
+import { Calendar, Clock, Users, Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { auth, db } from '@/lib/firebase-config'
+import { useAuthState } from 'react-firebase-hooks/auth'
 import { 
   collection, 
   doc, 
   setDoc, 
   updateDoc, 
-  deleteDoc, 
-  getDoc,
+  deleteDoc,
   getDocs,
   query,
   where,
   onSnapshot
 } from 'firebase/firestore'
-import { signInWithPopup, signOut } from 'firebase/auth'
 
 // Types
 type UserType = {
@@ -32,6 +27,7 @@ type UserType = {
 }
 
 type Availability = {
+  id: string
   userId: string
   date: string
   status: 'available' | 'unavailable' | 'maybe'
@@ -48,45 +44,25 @@ type Rehearsal = {
   participants: string[]
 }
 
-export default function RehearsalScheduler() {
-  // Authentication
-  const [user, loadingAuth, errorAuth] = useAuthState(auth)
-  
-  // Firestore data
+export default function App() {
+  const [user, loading] = useAuthState(auth)
   const [users, setUsers] = useState<UserType[]>([])
   const [availabilities, setAvailabilities] = useState<Availability[]>([])
   const [rehearsals, setRehearsals] = useState<Rehearsal[]>([])
-  
-  // UI state
   const [currentMonth, setCurrentMonth] = useState(new Date())
-  const [isAddingRehearsal, setIsAddingRehearsal] = useState(false)
-  const [isManagingTeam, setIsManagingTeam] = useState(false)
-  const [editingUser, setEditingUser] = useState<UserType | null>(null)
-  const [newUser, setNewUser] = useState({
-    name: '',
-    email: '',
-    instrument: ''
-  })
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const [newRehearsal, setNewRehearsal] = useState({
-    date: '',
-    time: '18:00',
-    duration: '2 hours',
-    location: '',
-    description: ''
-  })
-  const [markingMode, setMarkingMode] = useState<'available' | 'unavailable'>('available')
-  const [isDragging, setIsDragging] = useState(false)
-  const [dragStartDate, setDragStartDate] = useState<Date | null>(null)
-  const [dragEndDate, setDragEndDate] = useState<Date | null>(null)
-  const calendarRef = useRef<HTMLDivElement>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  // Format date as YYYY-MM-DD
+  const formatDate = (date: Date) => format(date, 'yyyy-MM-dd')
 
   // Load data from Firestore
   useEffect(() => {
-    if (!user) return
+    if (!user) {
+      setIsLoading(false)
+      return
+    }
 
-    // Load users
-    const usersUnsub = onSnapshot(collection(db, 'users'), (snapshot) => {
+    const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
       const usersData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -94,20 +70,13 @@ export default function RehearsalScheduler() {
       setUsers(usersData)
     })
 
-    // Load availabilities
-    const availabilitiesUnsub = onSnapshot(
-      query(collection(db, 'availabilities'), where('userId', '==', user.uid)),
-      (snapshot) => {
-        const availabilitiesData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Availability[]
-        setAvailabilities(availabilitiesData)
-      }
-    )
+    return () => unsubscribe()
+  }, [user])
 
-    // Load rehearsals
-    const rehearsalsUnsub = onSnapshot(collection(db, 'rehearsals'), (snapshot) => {
+  useEffect(() => {
+    if (!user) return
+
+    const unsubscribe = onSnapshot(collection(db, 'rehearsals'), (snapshot) => {
       const rehearsalsData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -115,184 +84,26 @@ export default function RehearsalScheduler() {
       setRehearsals(rehearsalsData)
     })
 
-    return () => {
-      usersUnsub()
-      availabilitiesUnsub()
-      rehearsalsUnsub()
-    }
+    return () => unsubscribe()
   }, [user])
 
-  // Initialize with default users if none exist
   useEffect(() => {
-    if (!user || users.length > 0) return
-
-    const initializeDefaultUsers = async () => {
-      const defaultUsers = [
-        { id: '1', name: 'Robin', email: 'rjlmoir@gmail.com', instrument: 'Stage Manager', color: 'bg-blue-500' },
-        { id: '2', name: 'Kate', email: 'kate.johnston54@gmail.com', instrument: 'Director', color: 'bg-green-500' },
-        { id: '3', name: 'Lisa', email: 'lrandall223@gmail.com', instrument: 'Sister Sophia', color: 'bg-purple-500' },
-        { id: '4', name: 'Jonathan', email: 'jonathaniscarroll@gmail.com', instrument: 'Tech', color: 'bg-red-500' },
-      ]
-
-      const batchWrites = defaultUsers.map(user => 
-        setDoc(doc(db, 'users', user.id), user)
-      )
-
-      await Promise.all(batchWrites)
-    }
-
-    initializeDefaultUsers()
-  }, [user, users])
-
-  // Authentication handlers
-  const handleLogin = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider)
-    } catch (error) {
-      console.error('Login error:', error)
-    }
-  }
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth)
-    } catch (error) {
-      console.error('Logout error:', error)
-    }
-  }
-
-  // User management
-  const validateUser = (user: Partial<UserType>) => {
-    const newErrors: Record<string, string> = {}
-    if (!user.name?.trim()) newErrors.name = 'Name is required'
-    if (user.email && !/^\S+@\S+\.\S+$/.test(user.email)) newErrors.email = 'Invalid email format'
-    return newErrors
-  }
-
-  const addUser = async () => {
-    const validationErrors = validateUser(newUser)
-    if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors)
-      return
-    }
-
-    const colors = ['bg-red-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500']
-    const newUserId = Date.now().toString()
-    const addedUser: UserType = {
-      id: newUserId,
-      name: newUser.name.trim(),
-      email: newUser.email.trim(),
-      instrument: newUser.instrument.trim(),
-      color: colors[users.length % colors.length]
-    }
-
-    await setDoc(doc(db, 'users', newUserId), addedUser)
-    setNewUser({ name: '', email: '', instrument: '' })
-    setErrors({})
-  }
-
-  const editUser = async () => {
-    if (!editingUser) return
-
-    const validationErrors = validateUser(editingUser)
-    if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors)
-      return
-    }
-
-    await updateDoc(doc(db, 'users', editingUser.id), editingUser)
-    setEditingUser(null)
-    setErrors({})
-  }
-
-  const deleteUser = async (userId: string) => {
-    if (window.confirm('Are you sure you want to delete this team member?')) {
-      await deleteDoc(doc(db, 'users', userId))
-      
-      // Delete related availabilities
-      const availabilitiesQuery = query(
-        collection(db, 'availabilities'), 
-        where('userId', '==', userId)
-      )
-      const availabilitiesSnapshot = await getDocs(availabilitiesQuery)
-      const deletePromises = availabilitiesSnapshot.docs.map(doc => 
-        deleteDoc(doc.ref)
-      )
-      await Promise.all(deletePromises)
-      
-      // Remove from rehearsals
-      const rehearsalsQuery = query(
-        collection(db, 'rehearsals'),
-        where('participants', 'array-contains', userId)
-      )
-      const rehearsalsSnapshot = await getDocs(rehearsalsQuery)
-      const updatePromises = rehearsalsSnapshot.docs.map(doc =>
-        updateDoc(doc.ref, {
-          participants: doc.data().participants.filter((p: string) => p !== userId)
-        })
-      )
-      await Promise.all(updatePromises)
-    }
-  }
-
-  // Availability management
-  const updateAvailability = async (date: Date, status: 'available' | 'unavailable' | 'maybe') => {
     if (!user) return
 
-    const dateStr = formatDate(date)
-    const existingAvailability = availabilities.find(a => 
-      a.userId === user.uid && a.date === dateStr
-    )
-
-    if (existingAvailability) {
-      await updateDoc(doc(db, 'availabilities', existingAvailability.id), {
-        status,
-        notes: ''
-      })
-    } else {
-      const newAvailability: Availability = {
-        userId: user.uid,
-        date: dateStr,
-        status,
-        notes: ''
-      }
-      await setDoc(doc(collection(db, 'availabilities')), newAvailability)
-    }
-  }
-
-  // Rehearsal management
-  const scheduleRehearsal = async () => {
-    if (!newRehearsal.date || !newRehearsal.time || !newRehearsal.location) {
-      alert('Please fill in all required fields')
-      return
-    }
-
-    const newRehearsalEntry: Rehearsal = {
-      id: '', // Firestore will auto-generate ID
-      date: newRehearsal.date,
-      time: newRehearsal.time,
-      duration: newRehearsal.duration,
-      location: newRehearsal.location,
-      description: newRehearsal.description,
-      participants: users.map(u => u.id)
-    }
-
-    await setDoc(doc(collection(db, 'rehearsals')), newRehearsalEntry)
-    setNewRehearsal({
-      date: '',
-      time: '18:00',
-      duration: '2 hours',
-      location: '',
-      description: ''
+    const q = query(collection(db, 'availabilities'), where('userId', '==', user.uid))
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const availabilitiesData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Availability[]
+      setAvailabilities(availabilitiesData)
+      setIsLoading(false)
     })
-    setIsAddingRehearsal(false)
-  }
 
-  // Helper functions
-  const formatDate = (date: Date): string => {
-    return date.toISOString().split('T')[0]
-  }
+    return () => unsubscribe()
+  }, [user])
 
+  // Calendar functions
   const getDaysInMonth = (year: number, month: number) => {
     const date = new Date(year, month, 1)
     const days = []
@@ -305,250 +116,33 @@ export default function RehearsalScheduler() {
     return days
   }
 
-
-  const daysInMonth = getDaysInMonth(
-    currentMonth.getFullYear(),
-    currentMonth.getMonth()
-  );
-
-  // Month navigation
   const prevMonth = () => {
     setCurrentMonth(new Date(
       currentMonth.getFullYear(),
       currentMonth.getMonth() - 1,
       1
-    ));
-  };
+    ))
+  }
 
   const nextMonth = () => {
     setCurrentMonth(new Date(
       currentMonth.getFullYear(),
       currentMonth.getMonth() + 1,
       1
-    ));
-  };
+    ))
+  }
 
-  // User management
-  // const validateUser = (user: Partial<UserType>) => {
-  //   const newErrors: Record<string, string> = {};
-  //   if (!user.name?.trim()) newErrors.name = 'Name is required';
-  //   if (user.email && !/^\S+@\S+\.\S+$/.test(user.email)) newErrors.email = 'Invalid email format';
-  //   return newErrors;
-  // };
+  const daysInMonth = getDaysInMonth(
+    currentMonth.getFullYear(),
+    currentMonth.getMonth()
+  )
 
-  // const addUser = async () => {
-  //   const validationErrors = validateUser(newUser);
-  //   if (Object.keys(validationErrors).length > 0) {
-  //     setErrors(validationErrors);
-  //     return;
-  //   }
-
-  //   const colors = ['bg-red-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500'];
-  //   const addedUser: UserType = {
-  //     id: Date.now().toString(),
-  //     name: newUser.name.trim(),
-  //     email: newUser.email.trim(),
-  //     instrument: newUser.instrument.trim(),
-  //     color: colors[users.length % colors.length]
-  //   };
-
-  //   setUsers([...users, addedUser]);
-  //   setNewUser({ name: '', email: '', instrument: '' });
-  //   setErrors({});
-  // };
-
-  // const editUser = async () => {
-  //   if (!editingUser) return;
-
-  //   const validationErrors = validateUser(editingUser);
-  //   if (Object.keys(validationErrors).length > 0) {
-  //     setErrors(validationErrors);
-  //     return;
-  //   }
-
-  //   setUsers(users.map(u => u.id === editingUser.id ? editingUser : u));
-  //   setEditingUser(null);
-  //   setErrors({});
-  // };
-
-  // const deleteUser = async (userId: string) => {
-  //   if (window.confirm('Are you sure you want to delete this team member?')) {
-  //     setUsers(users.filter(u => u.id !== userId));
-  //     setAvailabilities(availabilities.filter(a => a.userId !== userId));
-  //     setRehearsals(rehearsals.map(r => ({
-  //       ...r,
-  //       participants: r.participants.filter(p => p !== userId)
-  //     })));
-  //   }
-  // };
-
-  // Rehearsal management
-  const getUserAvailability = (userId: string, date: Date) => {
-    const dateStr = formatDate(date);
-    return availabilities.find(a => a.userId === userId && a.date === dateStr);
-  };
-
-  const hasRehearsal = (date: Date) => {
-    const dateStr = formatDate(date);
-    return rehearsals.some(r => r.date === dateStr);
-  };
-
-  const getRehearsal = (date: Date) => {
-    const dateStr = formatDate(date);
-    return rehearsals.find(r => r.date === dateStr);
-  };
-
-  // const scheduleRehearsal = async () => {
-  //   if (!newRehearsal.date || !newRehearsal.time || !newRehearsal.location) {
-  //     alert('Please fill in all required fields');
-  //     return;
-  //   }
-
-  //   const newRehearsalEntry: Rehearsal = {
-  //     id: Date.now().toString(),
-  //     date: newRehearsal.date,
-  //     time: newRehearsal.time,
-  //     duration: newRehearsal.duration,
-  //     location: newRehearsal.location,
-  //     description: newRehearsal.description,
-  //     participants: users.map(u => u.id)
-  //   };
-
-  //   setRehearsals([...rehearsals, newRehearsalEntry]);
-  //   setNewRehearsal({
-  //     date: '',
-  //     time: '18:00',
-  //     duration: '2 hours',
-  //     location: '',
-  //     description: ''
-  //   });
-  //   setIsAddingRehearsal(false);
-  // };
-
-  // Drag selection
-  const handleRehearsalInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setNewRehearsal(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-
-  const handleUserInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    if (editingUser) {
-      setEditingUser({
-        ...editingUser,
-        [name]: value
-      });
-    } else {
-      setNewUser({
-        ...newUser,
-        [name]: value
-      });
-    }
-  };
-
-  const handleDragStart = (date: Date) => {
-    if (!currentUser) return;
-    setIsDragging(true);
-    setDragStartDate(new Date(date));
-    setDragEndDate(new Date(date));
-  };
-
-  const handleDragEnter = (date: Date) => {
-    if (!isDragging || !dragStartDate) return;
-    setDragEndDate(new Date(date));
-  };
-
-  const handleDragEnd = async () => {
-    if (!isDragging || !dragStartDate || !dragEndDate || !currentUser) {
-      setIsDragging(false);
-      return;
-    }
-  
-    // Sort dates chronologically
-    const start = dragStartDate < dragEndDate ? new Date(dragStartDate) : new Date(dragEndDate);
-    const end = dragStartDate < dragEndDate ? new Date(dragEndDate) : new Date(dragStartDate);
-  
-    const currentDate = new Date(start);
-    
-    while (currentDate <= end) {
-      const dateStr = formatDate(currentDate);
-      
-      // Check if availability exists
-      const existingAvailability = availabilities.find(
-        a => a.userId === currentUser && a.date === dateStr
-      );
-  
-      if (existingAvailability) {
-        await updateDoc(doc(db, 'availabilities', existingAvailability.id), {
-          status: markingMode
-        });
-      } else {
-        await setDoc(doc(collection(db, 'availabilities')), {
-          userId: currentUser,
-          date: dateStr,
-          status: markingMode,
-          notes: ''
-        });
-      }
-  
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-  
-    setIsDragging(false);
-    setDragStartDate(null);
-    setDragEndDate(null);
-  };
-  
-
-  const isDateInDragSelection = (date: Date) => {
-    if (!isDragging || !dragStartDate || !dragEndDate) return false;
-
-    const start = dragStartDate < dragEndDate ? dragStartDate : dragEndDate;
-    const end = dragStartDate < dragEndDate ? dragEndDate : dragStartDate;
-
-    return date >= start && date <= end && date.getMonth() === currentMonth.getMonth();
-  };
-
-  // Modal Component
-  const Modal = ({ isOpen, onClose, children, title }: {
-    isOpen: boolean;
-    onClose: () => void;
-    children: React.ReactNode;
-    title: string;
-  }) => {
-    if (!isOpen) return null;
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <Card className="w-full max-w-md mx-4">
-          <CardHeader>
-            <div className="flex justify-between items-center">
-              <CardTitle>{title}</CardTitle>
-              <Button variant="ghost" size="sm" onClick={onClose}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {children}
-          </CardContent>
-        </Card>
-      </div>
-    );
-  };
-
-  if (isLoading) {
+  if (loading || isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-lg h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
-          <p>Loading rehearsal data...</p>
-        </div>
+        <Loader2 className="h-8 w-8 animate-spin" />
       </div>
-    );
+    )
   }
 
   if (!user) {
@@ -556,15 +150,10 @@ export default function RehearsalScheduler() {
       <div className="flex items-center justify-center h-screen">
         <Card className="w-full max-w-md">
           <CardHeader>
-            <CardTitle>Rehearsal Scheduler</CardTitle>
-            <CardDescription>
-              Please sign in to access the rehearsal scheduler
-            </CardDescription>
+            <CardTitle>Please sign in</CardTitle>
           </CardHeader>
           <CardContent>
-            <Button onClick={handleLogin} className="w-full">
-              Sign in with Google
-            </Button>
+            <p>You need to be signed in to access the rehearsal scheduler.</p>
           </CardContent>
         </Card>
       </div>
@@ -575,79 +164,12 @@ export default function RehearsalScheduler() {
     <div className="container mx-auto px-4 py-8">
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-center">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="h-6 w-6" />
-                Team Rehearsal Scheduler
-              </CardTitle>
-              <CardDescription>
-                Manage team members, availabilities, and schedule rehearsals
-              </CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Button onClick={() => setIsManagingTeam(true)} variant="outline">
-                <Users className="h-4 w-4 mr-2" /> Manage Team
-              </Button>
-              <Button onClick={() => setIsAddingRehearsal(true)}>
-                <Plus className="h-4 w-4 mr-2" /> Schedule Rehearsal
-              </Button>
-            </div>
-          </div>
+          <CardTitle className="flex items-center gap-2">
+            <Calendar className="h-6 w-6" />
+            Rehearsal Scheduler
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          {/* User Selection and Marking Mode */}
-          <div className="mb-6 p-4 border rounded-lg bg-muted">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  I am:
-                </label>
-                <Select onValueChange={setCurrentUser} value={currentUser}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select your name" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {users.map(user => (
-                      <SelectItem key={user.id} value={user.id}>
-                        <div className="flex items-center gap-2">
-                          <div className={`h-3 w-3 rounded-full ${user.color}`} />
-                          {user.name}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  I want to mark:
-                </label>
-                <div className="flex gap-2">
-                  <Button
-                    variant={markingMode === 'available' ? 'default' : 'outline'}
-                    onClick={() => setMarkingMode('available')}
-                    className="flex-1"
-                  >
-                    <CheckCircle className="h-4 w-4 mr-2" /> Available
-                  </Button>
-                  <Button
-                    variant={markingMode === 'unavailable' ? 'default' : 'outline'}
-                    onClick={() => setMarkingMode('unavailable')}
-                    className="flex-1"
-                  >
-                    <Lock className="h-4 w-4 mr-2" /> Unavailable
-                  </Button>
-                </div>
-              </div>
-            </div>
-            {currentUser && (
-              <p className="mt-2 text-sm text-muted-foreground">
-                Click and drag across dates to mark your {markingMode === 'available' ? 'availability' : 'unavailability'}
-              </p>
-            )}
-          </div>
-
           {/* Month navigation */}
           <div className="flex justify-between items-center mb-6">
             <Button variant="outline" onClick={prevMonth}>
@@ -662,11 +184,7 @@ export default function RehearsalScheduler() {
           </div>
 
           {/* Calendar grid */}
-          <div 
-            className="grid grid-cols-7 gap-2"
-            ref={calendarRef}
-            onMouseLeave={handleDragEnd}
-          >
+          <div className="grid grid-cols-7 gap-2">
             {/* Day headers */}
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
               <div key={day} className="text-center font-medium py-2">
@@ -676,359 +194,71 @@ export default function RehearsalScheduler() {
 
             {/* Calendar days */}
             {daysInMonth.map((day, index) => {
-              const rehearsal = getRehearsal(day);
-              const isRehearsal = hasRehearsal(day);
-              const userAvailability = currentUser ? getUserAvailability(currentUser, day) : null;
-              const isInDragSelection = isDateInDragSelection(day);
-
-              // Determine cell appearance
-              let cellAppearance = 'bg-muted';
-              if (isInDragSelection) {
-                cellAppearance = markingMode === 'available' 
-                  ? 'bg-green-100 border-green-300' 
-                  : 'bg-red-100 border-red-300';
-              } else if (isRehearsal) {
-                cellAppearance = 'bg-blue-50 border-blue-200';
-              } else if (userAvailability) {
-                cellAppearance = userAvailability.status === 'available' 
-                  ? 'bg-green-50 border-green-200' 
-                  : userAvailability.status === 'unavailable' 
-                    ? 'bg-red-50 border-red-200' 
-                    : 'bg-yellow-50 border-yellow-200';
-              }
+              const dateStr = formatDate(day)
+              const userAvailability = availabilities.find(a => a.date === dateStr)
+              const rehearsal = rehearsals.find(r => r.date === dateStr)
 
               return (
                 <div
                   key={index}
-                  onMouseDown={() => handleDragStart(day)}
-                  onMouseEnter={() => handleDragEnter(day)}
-                  onMouseUp={handleDragEnd}
-                  className={`border rounded-lg p-2 min-h-32 cursor-pointer select-none ${
-                    day.getMonth() !== currentMonth.getMonth() ? 'opacity-50' : ''
-                  } ${cellAppearance}`}
+                  className={`border rounded-lg p-2 min-h-24 ${
+                    day.getMonth() !== currentMonth.getMonth()
+                      ? 'opacity-50'
+                      : ''
+                  } ${
+                    rehearsal
+                      ? 'bg-blue-50 border-blue-200'
+                      : userAvailability?.status === 'available'
+                      ? 'bg-green-50 border-green-200'
+                      : userAvailability?.status === 'unavailable'
+                      ? 'bg-red-50 border-red-200'
+                      : userAvailability?.status === 'maybe'
+                      ? 'bg-yellow-50 border-yellow-200'
+                      : 'bg-gray-50'
+                  }`}
                 >
                   <div className="flex justify-between items-start">
                     <span className="font-medium">{day.getDate()}</span>
-                    {isRehearsal && (
-                      <div className="text-xs bg-blue-100 text-blue-800 px-1 rounded">
-                        Rehearsal
-                      </div>
-                    )}
                   </div>
 
-                  {/* User availability indicators */}
-                  <div className="mt-2 space-y-1">
-                    {users.map(user => {
-                      const availability = getUserAvailability(user.id, day);
-                      return (
-                        <div key={user.id} className="flex items-center gap-1">
-                          <div className={`h-2 w-2 rounded-full ${user.color}`} />
-                          <span className="text-xs truncate">
-                            {availability
-                              ? availability.status === 'available'
-                                ? '✓'
-                                : availability.status === 'unavailable'
-                                ? '✗'
-                                : '?'
-                              : '-'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {rehearsal && (
+                    <div className="mt-2 text-xs space-y-1">
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        <span>{rehearsal.time}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Users className="h-3 w-3" />
+                        <span>{rehearsal.location}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              );
+              )
             })}
           </div>
 
           {/* Legend */}
-          <div className="mt-6 flex flex-wrap gap-4 text-sm">
+          <div className="mt-6 flex gap-4 text-sm">
             <div className="flex items-center gap-2">
               <div className="h-4 w-4 rounded bg-green-50 border border-green-200" />
               <span>Available</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="h-4 w-4 rounded bg-red-50 border border-red-200" />
-              <span>Unavailable</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="h-4 w-4 rounded bg-blue-50 border border-blue-200" />
               <span>Scheduled Rehearsal</span>
             </div>
             <div className="flex items-center gap-2">
+              <div className="h-4 w-4 rounded bg-red-50 border border-red-200" />
+              <span>Unavailable</span>
+            </div>
+            <div className="flex items-center gap-2">
               <div className="h-4 w-4 rounded bg-yellow-50 border border-yellow-200" />
-              <span>Maybe Available</span>
+              <span>Maybe</span>
             </div>
           </div>
-
-          {/* Team Management Modal */}
-          <Modal
-            isOpen={isManagingTeam}
-            onClose={() => {
-              setIsManagingTeam(false);
-              setEditingUser(null);
-            }}
-            title="Manage Team Members"
-          >
-            <div className="space-y-6">
-              {/* Add New Member */}
-              <div className="border rounded-lg p-4">
-                <h3 className="font-medium mb-4">
-                  {editingUser ? 'Edit Team Member' : 'Add New Team Member'}
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Name *
-                    </label>
-                    <Input
-                      name="name"
-                      value={editingUser?.name || newUser.name}
-                      onChange={handleUserInputChange}
-                      placeholder="Full name"
-                    />
-                    {errors.name && <p className="text-sm text-red-500 mt-1">{errors.name}</p>}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Email
-                    </label>
-                    <Input
-                      name="email"
-                      value={editingUser?.email || newUser.email}
-                      onChange={handleUserInputChange}
-                      placeholder="Email address"
-                      type="email"
-                    />
-                    {errors.email && <p className="text-sm text-red-500 mt-1">{errors.email}</p>}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Instrument
-                    </label>
-                    <Input
-                      name="instrument"
-                      value={editingUser?.instrument || newUser.instrument}
-                      onChange={handleUserInputChange}
-                      placeholder="Primary instrument"
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2 mt-4">
-                  {editingUser && (
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setEditingUser(null);
-                        setErrors({});
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  <Button
-                    onClick={editingUser ? editUser : addUser}
-                    className="ml-2"
-                  >
-                    {editingUser ? 'Save Changes' : 'Add Team Member'}
-                  </Button>
-                </div>
-              </div>
-
-              {/* Team Members List */}
-              <div>
-                <h3 className="font-medium mb-2">Current Team Members</h3>
-                <div className="space-y-2">
-                  {users.length > 0 ? (
-                    users.map(user => (
-                      <div key={user.id} className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <div className={`h-4 w-4 rounded-full ${user.color}`} />
-                          <div>
-                            <p className="font-medium">{user.name}</p>
-                            <div className="flex gap-3 text-sm text-muted-foreground">
-                              {user.email && <span>{user.email}</span>}
-                              {user.instrument && <span>• {user.instrument}</span>}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setEditingUser(user)}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => deleteUser(user.id)}
-                          >
-                            <Trash className="h-4 w-4 text-red-500" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-muted-foreground">No team members added yet</p>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end mt-4">
-              <Button onClick={() => setIsManagingTeam(false)}>
-                Done
-              </Button>
-            </div>
-          </Modal>
-
-          {/* Schedule Rehearsal Modal */}
-          <Modal
-            isOpen={isAddingRehearsal}
-            onClose={() => setIsAddingRehearsal(false)}
-            title="Schedule New Rehearsal"
-          >
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Date *
-                </label>
-                <Input
-                  type="date"
-                  name="date"
-                  value={newRehearsal.date}
-                  onChange={handleRehearsalInputChange}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">
-                    Time *
-                  </label>
-                  <Input
-                    type="time"
-                    name="time"
-                    value={newRehearsal.time}
-                  onChange={handleRehearsalInputChange}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Duration
-                </label>
-                <Select
-                  value={newRehearsal.duration}
-                  onValueChange={(value) => setNewRehearsal({...newRehearsal, duration: value})}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select duration" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1 hour">1 hour</SelectItem>
-                    <SelectItem value="1.5 hours">1.5 hours</SelectItem>
-                    <SelectItem value="2 hours">2 hours</SelectItem>
-                    <SelectItem value="3 hours">3 hours</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Location *
-              </label>
-              <Input
-                name="location"
-                value={newRehearsal.location}
-                onChange={handleRehearsalInputChange}
-                placeholder="Enter location"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Description
-              </label>
-              <Textarea
-                name="description"
-                value={newRehearsal.description}
-                onChange={handleRehearsalInputChange}
-                placeholder="Enter rehearsal details"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Participants ({users.length})
-              </label>
-              <div className="space-y-2 max-h-40 overflow-y-auto p-2 border rounded">
-                {users.map(user => (
-                  <div key={user.id} className="flex items-center gap-2">
-                    <div className={`h-3 w-3 rounded-full ${user.color}`} />
-                    <span>{user.name}</span>
-                    {user.instrument && (
-                      <span className="text-xs text-muted-foreground ml-auto">({user.instrument})</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 mt-4">
-            <Button
-              variant="outline"
-              onClick={() => setIsAddingRehearsal(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={scheduleRehearsal}>
-              <Check className="h-4 w-4 mr-2" /> Schedule Rehearsal
-            </Button>
-          </div>
-        </Modal>
-
-        {/* Scheduled Rehearsals List */}
-        <div className="mt-8">
-          <h3 className="text-lg font-semibold mb-4">Upcoming Rehearsals</h3>
-          <div className="space-y-4">
-            {rehearsals.length > 0 ? (
-              rehearsals.map(rehearsal => (
-                <Card key={rehearsal.id}>
-                  <CardHeader>
-                    <CardTitle>{rehearsal.description}</CardTitle>
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-1">
-                        <Calendar className="h-4 w-4" />
-                        {new Date(rehearsal.date).toLocaleDateString('en-US', {
-                          weekday: 'short',
-                          month: 'short',
-                          day: 'numeric'
-                        })}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Clock className="h-4 w-4" />
-                        {rehearsal.time} ({rehearsal.duration})
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Users className="h-4 w-4" />
-                        {rehearsal.participants.length} attending
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <p>Location: {rehearsal.location}</p>
-                  </CardContent>
-                </Card>
-              ))
-            ) : (
-              <p className="text-muted-foreground">No rehearsals scheduled yet</p>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  </div>
-);
+        </CardContent>
+      </Card>
+    </div>
+  )
 }
