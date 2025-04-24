@@ -16,6 +16,7 @@ import {
   where,
   onSnapshot
 } from 'firebase/firestore'
+import { getAuth, onAuthStateChanged } from "firebase/auth"
 
 
 
@@ -67,6 +68,20 @@ export default function App() {
       projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID
     });
   }, []);
+
+  useEffect(() => {
+    const auth = getAuth()
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log("Auth state changed:", user)
+      if (user) {
+        // User is signed in
+      } else {
+        // User is signed out
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
 
   // Load data from Firestore
   useEffect(() => {
