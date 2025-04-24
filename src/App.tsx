@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { format } from 'date-fns'
-import { Calendar, Clock, Users, Plus, CheckCircle, Lock, Edit, Trash, Check,Loader2, X } from 'lucide-react'
+import { Calendar, Clock, Users, Plus, CheckCircle, Lock, Edit, Trash, Check, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -19,11 +19,11 @@ import {
   query,
   where,
   serverTimestamp,
-  getDocs
+  getDocs,
+  writeBatch
 } from 'firebase/firestore'
-import { getAuth } from "firebase/auth"
-import Auth from '@/components/Auth'
 import Modal from '@/components/Modal'
+import Auth from '@/components/Auth'
 
 // Types
 type UserType = {
@@ -58,7 +58,7 @@ export default function App() {
   
   // App state
   const [users, setUsers] = useState<UserType[]>([])
-  const [availabilities, setAvailabilities] = useState<Availability[]>([])
+  const [allAvailabilities, setAllAvailabilities] = useState<Availability[]>([])
   const [rehearsals, setRehearsals] = useState<Rehearsal[]>([])
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [currentUser, setCurrentUser] = useState<string | null>(null)
@@ -69,15 +69,14 @@ export default function App() {
   const [dragSelection, setDragSelection] = useState<Date[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [isLoading, setIsLoading] = useState(false);
-  const [userAvailabilities, setUserAvailabilities] = useState<Availability[]>([]);
+  const [isLoading, setIsLoading] = useState(false)
   
   // Form states
   const [newUser, setNewUser] = useState<Omit<UserType, 'id'>>({ 
     name: '',
     email: '',
     instrument: '',
-    color: `bg-[#${Math.floor(Math.random()*16777215).toString(16)}]`
+    color: `hsl(${Math.floor(Math.random() * 360)}, 70%, 70%)`
   })
   
   const [newRehearsal, setNewRehearsal] = useState<Omit<Rehearsal, 'id' | 'createdAt'>>({
@@ -95,34 +94,26 @@ export default function App() {
   const formatDate = (date: Date) => format(date, 'yyyy-MM-dd')
 
   useEffect(() => {
-    console.log("Current auth state:", auth.currentUser);
-    console.log("Current user state:", currentUser);
-  }, [currentUser]);
+    const testConnection = async () => {
+      try {
+        const testDoc = doc(db, 'test', 'connection');
+        await setDoc(testDoc, { test: true }, { merge: true });
+        console.log('Firestore connection successful');
+      } catch (error) {
+        console.error('Firestore connection failed:', error);
+      }
+    };
+    testConnection();
+  }, []);
   
   useEffect(() => {
-    console.log("Availabilities:", availabilities);
-  }, [availabilities]);
-
-  // Fetch availabilities on mount and when currentUser changes
-useEffect(() => {
-  if (!currentUser) return;
-
-  const unsubscribe = onSnapshot(
-    query(
-      collection(db, 'availabilities'),
-      where('userId', '==', currentUser)
-    ),
-    (snapshot) => {
-      const availData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Availability[];
-      setUserAvailabilities(availData);
+    if (user) {
+      console.log('Authenticated user:', user.uid);
+      setCurrentUser(user.uid); // Ensure this is set
+    } else {
+      console.log('No authenticated user');
     }
-  );
-
-  return () => unsubscribe();
-}, [currentUser]);
+  }, [user]);
 
   // Load data from Firebase
   useEffect(() => {
@@ -135,17 +126,22 @@ useEffect(() => {
         ...doc.data()
       })) as UserType[]
       setUsers(usersData)
+      
+      // Set current user if not already set
+      if (!currentUser && usersData.length > 0) {
+        setCurrentUser(user.uid)
+      }
     })
 
-    // Load availabilities
+    // Load ALL availabilities (not just current user)
     const availabilitiesUnsubscribe = onSnapshot(
-      query(collection(db, 'availabilities'), where('userId', '==', user.uid)),
+      collection(db, 'availabilities'),
       (snapshot) => {
         const availabilitiesData = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         })) as Availability[]
-        setAvailabilities(availabilitiesData)
+        setAllAvailabilities(availabilitiesData)
       }
     )
 
@@ -200,43 +196,7 @@ useEffect(() => {
     ))
   }
 
-  const toggleAvailability = async (date: Date) => {
-    if (!currentUser || isLoading) return;
-    setIsLoading(true);
-
-    const dateStr = date.toISOString().split('T')[0];
-    const existing = userAvailabilities.find(a => a.date === dateStr);
-
-    try {
-      if (existing) {
-        const newStatus = existing.status === 'available' ? 'unavailable' : 'available';
-        await updateDoc(doc(db, 'availabilities', existing.id), {
-          status: newStatus,
-          updatedAt: serverTimestamp()
-        });
-      } else {
-        await setDoc(doc(collection(db, 'availabilities')), {
-          userId: currentUser,
-          date: dateStr,
-          status: 'available',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-      }
-    } catch (error) {
-      console.error("Error toggling availability:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-
-  // Availability functions
-  const getUserAvailability = (userId: string, date: Date) => {
-    const dateStr = formatDate(date)
-    return availabilities.find(a => a.userId === userId && a.date === dateStr)
-  }
-
+  // Enhanced drag functionality
   const handleDragStart = (date: Date) => {
     if (!currentUser) return
     setIsDragging(true)
@@ -245,29 +205,24 @@ useEffect(() => {
 
   const handleDragEnter = (date: Date) => {
     if (!isDragging || !currentUser) return
-    setDragSelection(prev => [...prev, date])
+    
+    const dateStr = date.toISOString().split('T')[0]
+    if (!dragSelection.some(d => d.toISOString().split('T')[0] === dateStr)) {
+      setDragSelection(prev => [...prev, date])
+    }
   }
 
   const handleDragEnd = async () => {
-    if (!isDragging || !currentUser || dragSelection.length === 0) {
-      setIsDragging(false);
-      setDragSelection([]);
-      return;
-    }
-  
-    // Ensure user is authenticated
-    const user = auth.currentUser;
-    if (!user) {
-      console.error("User not authenticated");
+    if (!isDragging || !user || dragSelection.length === 0) {
       setIsDragging(false);
       setDragSelection([]);
       return;
     }
   
     try {
-      const uniqueDates = Array.from(
-        new Set(dragSelection.map(d => formatDate(d)))
-      );
+      setIsLoading(true);
+      const batch = writeBatch(db);
+      const uniqueDates = Array.from(new Set(dragSelection.map(d => formatDate(d))));
   
       // Get existing availabilities for current user
       const q = query(
@@ -280,40 +235,39 @@ useEffect(() => {
         ...doc.data()
       })) as Availability[];
   
-      const batchPromises = uniqueDates.map(async (dateStr) => {
+      // Prepare batch operations
+      uniqueDates.forEach(dateStr => {
         const existing = existingAvailabilities.find(a => a.date === dateStr);
         const docRef = existing 
           ? doc(db, 'availabilities', existing.id)
           : doc(collection(db, 'availabilities'));
   
         const data = {
-          userId: user.uid, // Use auth UID, not just currentUser
+          userId: user.uid, // Use auth UID
           date: dateStr,
           status: markingMode,
           updatedAt: serverTimestamp()
         };
   
         if (existing) {
-          await updateDoc(docRef, data);
+          batch.update(docRef, data);
         } else {
-          await setDoc(docRef, {
+          batch.set(docRef, {
             ...data,
             createdAt: serverTimestamp()
           });
         }
       });
   
-      await Promise.all(batchPromises);
-      console.log("Successfully updated availabilities");
+      await batch.commit();
     } catch (error) {
       console.error("Error updating availabilities:", error);
-      alert("Failed to update availability. Please check console for details.");
     } finally {
+      setIsLoading(false);
       setIsDragging(false);
       setDragSelection([]);
     }
   };
-  
   
 
   // Team management functions
@@ -337,27 +291,26 @@ useEffect(() => {
   }
 
   const addUser = async () => {
-    if (!validateUser()) return;
+    if (!validateUser()) return
   
     try {
-      const docRef = doc(collection(db, 'users'));
+      const docRef = doc(collection(db, 'users'))
       await setDoc(docRef, {
         ...newUser,
-        id: docRef.id, // Store the document ID in the document
+        id: docRef.id,
         createdAt: serverTimestamp()
-      });
+      })
       setNewUser({ 
         name: '',
         email: '',
         instrument: '',
-        color: `bg-[#${Math.floor(Math.random()*16777215).toString(16)}]`
-      });
-      setErrors({});
+        color: `hsl(${Math.floor(Math.random() * 360)}, 70%, 70%)`
+      })
+      setErrors({})
     } catch (error) {
-      console.error("Error adding user:", error);
-      alert("Failed to add user. Please check console for details.");
+      console.error("Error adding user:", error)
     }
-  };
+  }
 
   const editUser = async () => {
     if (!editingUser || !validateUser()) return
@@ -404,10 +357,6 @@ useEffect(() => {
   const getRehearsal = (date: Date) => {
     const dateStr = formatDate(date)
     return rehearsals.find(r => r.date === dateStr)
-  }
-
-  const isDateInDragSelection = (date: Date) => {
-    return dragSelection.some(d => d.getTime() === date.getTime())
   }
 
   const handleRehearsalInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -462,13 +411,7 @@ useEffect(() => {
   }
 
   if (!user) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <Card className="w-full max-w-md">
-          <Auth />
-        </Card>
-      </div>
-    )
+    return <Auth />
   }
 
   return (
@@ -511,7 +454,10 @@ useEffect(() => {
                     {users.map(user => (
                       <SelectItem key={user.id} value={user.id}>
                         <div className="flex items-center gap-2">
-                          <div className={`h-3 w-3 rounded-full ${user.color}`} />
+                          <div 
+                            className="h-3 w-3 rounded-full" 
+                            style={{ backgroundColor: user.color }}
+                          />
                           {user.name}
                         </div>
                       </SelectItem>
@@ -562,7 +508,11 @@ useEffect(() => {
           </div>
 
           {/* Calendar grid */}
-          <div className="grid grid-cols-7 gap-2" ref={calendarRef} onMouseLeave={handleDragEnd}>
+          <div 
+            className="grid grid-cols-7 gap-2" 
+            ref={calendarRef}
+            onMouseLeave={handleDragEnd}
+          >
             {/* Day headers */}
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
               <div key={day} className="text-center font-medium py-2">
@@ -572,48 +522,27 @@ useEffect(() => {
 
             {/* Calendar days */}
             {daysInMonth.map((day, index) => {
-              const dateStr = day.toISOString().split('T')[0];
-              const rehearsal = getRehearsal(day);
-              const isRehearsal = hasRehearsal(day);
-              const userAvailability = currentUser 
-                ? userAvailabilities.find(a => a.date === dateStr && a.userId === currentUser)
-                : null;
+              const dateStr = day.toISOString().split('T')[0]
+              const rehearsal = getRehearsal(day)
+              const isRehearsal = hasRehearsal(day)
               const isInDragSelection = dragSelection.some(d => 
                 d.toISOString().split('T')[0] === dateStr
-              );
+              )
 
               // Determine cell appearance
-              let cellAppearance = 'bg-gray-50';
-              let borderAppearance = 'border-gray-200';
-              let textAppearance = 'text-gray-800';
+              let cellAppearance = 'bg-gray-50'
+              let borderAppearance = 'border-gray-200'
 
               if (isInDragSelection) {
                 cellAppearance = markingMode === 'available' 
                   ? 'bg-green-100' 
-                  : 'bg-red-100';
+                  : 'bg-red-100'
                 borderAppearance = markingMode === 'available'
                   ? 'border-green-300'
-                  : 'border-red-300';
+                  : 'border-red-300'
               } else if (isRehearsal) {
-                cellAppearance = 'bg-blue-50';
-                borderAppearance = 'border-blue-200';
-              } else if (userAvailability) {
-                cellAppearance = userAvailability.status === 'available' 
-                  ? 'bg-green-50' 
-                  : 'bg-red-50';
-                borderAppearance = userAvailability.status === 'available'
-                  ? 'border-green-200'
-                  : 'border-red-200';
-              }
-
-              // Show different text color for current day
-              const today = new Date();
-              if (
-                day.getDate() === today.getDate() &&
-                day.getMonth() === today.getMonth() &&
-                day.getFullYear() === today.getFullYear()
-              ) {
-                textAppearance = 'text-blue-600 font-bold';
+                cellAppearance = 'bg-blue-50'
+                borderAppearance = 'border-blue-200'
               }
 
               return (
@@ -631,7 +560,14 @@ useEffect(() => {
                   `}
                 >
                   <div className="flex justify-between items-start">
-                    <span className={`${textAppearance}`}>
+                    <span className={`
+                      ${day.getDate() === new Date().getDate() && 
+                        day.getMonth() === new Date().getMonth() && 
+                        day.getFullYear() === new Date().getFullYear()
+                        ? 'text-blue-600 font-bold' 
+                        : 'text-gray-800'
+                      }
+                    `}>
                       {day.getDate()}
                     </span>
                     {isRehearsal && (
@@ -645,14 +581,14 @@ useEffect(() => {
                   {/* User availability indicators */}
                   <div className="mt-2 space-y-1">
                     {users.map(user => {
-                      const availability = availabilities.find(a => 
+                      const availability = allAvailabilities.find(a => 
                         a.date === dateStr && a.userId === user.id
-                      );
+                      )
                       const statusSymbol = availability
                         ? availability.status === 'available'
                           ? '✓'
                           : '✗'
-                        : '?';
+                        : '?'
 
                       return (
                         <div 
@@ -661,18 +597,19 @@ useEffect(() => {
                           title={`${user.name}: ${availability?.status || 'no response'}`}
                         >
                           <div 
-                            className={`h-2 w-2 rounded-full ${user.color} flex-shrink-0`} 
+                            className="h-2 w-2 rounded-full flex-shrink-0" 
+                            style={{ backgroundColor: user.color }}
                           />
                           <span className="truncate font-medium">{user.name}</span>
                           <span className="ml-auto font-bold">
                             {statusSymbol}
                           </span>
                         </div>
-                      );
+                      )
                     })}
                   </div>
 
-                  {/* Rehearsal details tooltip */}
+                  {/* Rehearsal details */}
                   {isRehearsal && (
                     <div className="mt-2 text-xs text-blue-700">
                       <div className="font-medium">{rehearsal.location}</div>
@@ -680,9 +617,10 @@ useEffect(() => {
                     </div>
                   )}
                 </div>
-              );
+              )
             })}
           </div>
+
           {/* Legend */}
           <div className="mt-6 flex flex-wrap gap-4 text-sm">
             <div className="flex items-center gap-2">
@@ -697,32 +635,26 @@ useEffect(() => {
               <div className="h-4 w-4 rounded bg-blue-50 border border-blue-200" />
               <span>Scheduled Rehearsal</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="h-4 w-4 rounded bg-yellow-50 border border-yellow-200" />
-              <span>Maybe Available</span>
-            </div>
           </div>
 
           {/* Team Management Modal */}
           <Modal
             isOpen={isManagingTeam}
             onClose={() => {
-              setIsManagingTeam(false);
-              setEditingUser(null);
+              setIsManagingTeam(false)
+              setEditingUser(null)
             }}
             title="Manage Team Members"
           >
             <div className="space-y-6">
-              {/* Add New Member */}
+              {/* Add/Edit Member Form */}
               <div className="border rounded-lg p-4">
                 <h3 className="font-medium mb-4">
                   {editingUser ? 'Edit Team Member' : 'Add New Team Member'}
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Name *
-                    </label>
+                    <Label>Name *</Label>
                     <Input
                       name="name"
                       value={editingUser?.name || newUser.name}
@@ -732,9 +664,7 @@ useEffect(() => {
                     {errors.name && <p className="text-sm text-red-500 mt-1">{errors.name}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Email
-                    </label>
+                    <Label>Email</Label>
                     <Input
                       name="email"
                       value={editingUser?.email || newUser.email}
@@ -745,9 +675,7 @@ useEffect(() => {
                     {errors.email && <p className="text-sm text-red-500 mt-1">{errors.email}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Instrument
-                    </label>
+                    <Label>Instrument</Label>
                     <Input
                       name="instrument"
                       value={editingUser?.instrument || newUser.instrument}
@@ -761,8 +689,8 @@ useEffect(() => {
                     <Button
                       variant="outline"
                       onClick={() => {
-                        setEditingUser(null);
-                        setErrors({});
+                        setEditingUser(null)
+                        setErrors({})
                       }}
                     >
                       Cancel
@@ -770,7 +698,6 @@ useEffect(() => {
                   )}
                   <Button
                     onClick={editingUser ? editUser : addUser}
-                    className="ml-2"
                   >
                     {editingUser ? 'Save Changes' : 'Add Team Member'}
                   </Button>
@@ -785,7 +712,10 @@ useEffect(() => {
                     users.map(user => (
                       <div key={user.id} className="flex items-center justify-between p-3 border rounded-lg">
                         <div className="flex items-center gap-3">
-                          <div className={`h-4 w-4 rounded-full ${user.color}`} />
+                          <div 
+                            className="h-4 w-4 rounded-full" 
+                            style={{ backgroundColor: user.color }}
+                          />
                           <div>
                             <p className="font-medium">{user.name}</p>
                             <div className="flex gap-3 text-sm text-muted-foreground">
@@ -818,11 +748,6 @@ useEffect(() => {
                 </div>
               </div>
             </div>
-            <div className="flex justify-end mt-4">
-              <Button onClick={() => setIsManagingTeam(false)}>
-                Done
-              </Button>
-            </div>
           </Modal>
 
           {/* Schedule Rehearsal Modal */}
@@ -833,9 +758,7 @@ useEffect(() => {
           >
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">
-                  Date *
-                </label>
+                <Label>Date *</Label>
                 <Input
                   type="date"
                   name="date"
@@ -846,9 +769,7 @@ useEffect(() => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">
-                    Time *
-                  </label>
+                  <Label>Time *</Label>
                   <Input
                     type="time"
                     name="time"
@@ -857,9 +778,7 @@ useEffect(() => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">
-                    Duration
-                  </label>
+                  <Label>Duration</Label>
                   <Select
                     value={newRehearsal.duration}
                     onValueChange={(value) => setNewRehearsal({...newRehearsal, duration: value})}
@@ -878,9 +797,7 @@ useEffect(() => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">
-                  Location *
-                </label>
+                <Label>Location *</Label>
                 <Input
                   name="location"
                   value={newRehearsal.location}
@@ -890,9 +807,7 @@ useEffect(() => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">
-                  Description
-                </label>
+                <Label>Description</Label>
                 <Textarea
                   name="description"
                   value={newRehearsal.description}
@@ -902,13 +817,14 @@ useEffect(() => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">
-                  Participants ({users.length})
-                </label>
+                <Label>Participants ({users.length})</Label>
                 <div className="space-y-2 max-h-40 overflow-y-auto p-2 border rounded">
                   {users.map(user => (
                     <div key={user.id} className="flex items-center gap-2">
-                      <div className={`h-3 w-3 rounded-full ${user.color}`} />
+                      <div 
+                        className="h-3 w-3 rounded-full" 
+                        style={{ backgroundColor: user.color }}
+                      />
                       <span>{user.name}</span>
                       {user.instrument && (
                         <span className="text-xs text-muted-foreground ml-auto">({user.instrument})</span>
@@ -931,7 +847,7 @@ useEffect(() => {
             </div>
           </Modal>
 
-          {/* Scheduled Rehearsals List */}
+          {/* Upcoming Rehearsals List */}
           <div className="mt-8">
             <h3 className="text-lg font-semibold mb-4">Upcoming Rehearsals</h3>
             <div className="space-y-4">
@@ -972,6 +888,5 @@ useEffect(() => {
         </CardContent>
       </Card>
     </div>
-    
   )
 }
