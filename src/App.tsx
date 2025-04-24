@@ -187,45 +187,59 @@ export default function App() {
 
   const handleDragEnd = async () => {
     if (!isDragging || !currentUser || dragSelection.length === 0) {
-      setIsDragging(false)
-      setDragSelection([])
-      return
+      setIsDragging(false);
+      setDragSelection([]);
+      return;
     }
-
+  
     try {
-      // Get unique dates from drag selection
-      const uniqueDates = Array.from(new Set(dragSelection.map(d => formatDate(d))))
-      
-      // Update availabilities in Firebase
+      const uniqueDates = Array.from(
+        new Set(dragSelection.map(d => formatDate(d)))
+      );
+  
+      // Get existing availabilities for current user
+      const q = query(
+        collection(db, 'availabilities'),
+        where('userId', '==', currentUser)
+      );
+      const querySnapshot = await getDocs(q);
+      const existingAvailabilities = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Availability[];
+  
       const batchPromises = uniqueDates.map(async (dateStr) => {
-        const existingAvailability = availabilities.find(
-          a => a.userId === currentUser && a.date === dateStr
-        )
-
-        if (existingAvailability) {
-          // Update existing availability
-          await updateDoc(doc(db, 'availabilities', existingAvailability.id), {
-            status: markingMode
-          })
+        const existing = existingAvailabilities.find(a => a.date === dateStr);
+        const docRef = existing 
+          ? doc(db, 'availabilities', existing.id)
+          : doc(collection(db, 'availabilities'));
+  
+        const data = {
+          userId: currentUser,
+          date: dateStr,
+          status: markingMode,
+          updatedAt: serverTimestamp()
+        };
+  
+        if (existing) {
+          await updateDoc(docRef, data);
         } else {
-          // Create new availability
-          await setDoc(doc(collection(db, 'availabilities')), {
-            userId: currentUser,
-            date: dateStr,
-            status: markingMode,
+          await setDoc(docRef, {
+            ...data,
             createdAt: serverTimestamp()
-          })
+          });
         }
-      })
-
-      await Promise.all(batchPromises)
+      });
+  
+      await Promise.all(batchPromises);
     } catch (error) {
-      console.error("Error updating availabilities:", error)
+      console.error("Error updating availabilities:", error);
     } finally {
-      setIsDragging(false)
-      setDragSelection([])
+      setIsDragging(false);
+      setDragSelection([]);
     }
-  }
+  };
+  
 
   // Team management functions
   const handleUserInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -248,24 +262,27 @@ export default function App() {
   }
 
   const addUser = async () => {
-    if (!validateUser()) return
-
+    if (!validateUser()) return;
+  
     try {
-      await setDoc(doc(collection(db, 'users')), {
+      const docRef = doc(collection(db, 'users'));
+      await setDoc(docRef, {
         ...newUser,
+        id: docRef.id, // Store the document ID in the document
         createdAt: serverTimestamp()
-      })
+      });
       setNewUser({ 
         name: '',
         email: '',
         instrument: '',
         color: `bg-[#${Math.floor(Math.random()*16777215).toString(16)}]`
-      })
-      setErrors({})
+      });
+      setErrors({});
     } catch (error) {
-      console.error("Error adding user:", error)
+      console.error("Error adding user:", error);
+      alert("Failed to add user. Please check console for details.");
     }
-  }
+  };
 
   const editUser = async () => {
     if (!editingUser || !validateUser()) return
