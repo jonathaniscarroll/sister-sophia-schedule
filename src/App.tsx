@@ -17,6 +17,9 @@ import {
   onSnapshot
 } from 'firebase/firestore'
 
+
+
+
 // Types
 type UserType = {
   id: string
@@ -44,6 +47,8 @@ type Rehearsal = {
   participants: string[]
 }
 
+
+
 export default function App() {
   const [user, loading] = useAuthState(auth)
   const [users, setUsers] = useState<UserType[]>([])
@@ -54,6 +59,14 @@ export default function App() {
 
   // Format date as YYYY-MM-DD
   const formatDate = (date: Date) => format(date, 'yyyy-MM-dd')
+
+  useEffect(() => {
+    console.log('Firebase Config:', {
+      apiKey: import.meta.env.VITE_FIREBASE_API_KEY?.substring(0, 5) + '...',
+      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID
+    });
+  }, []);
 
   // Load data from Firestore
   useEffect(() => {
@@ -161,7 +174,9 @@ export default function App() {
   }
 
   return (
+      
     <div className="container mx-auto px-4 py-8">
+      <DebugEnv />
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
