@@ -69,6 +69,8 @@ export default function App() {
   const [dragSelection, setDragSelection] = useState<Date[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [isLoading, setIsLoading] = useState(false);
+  const [userAvailabilities, setUserAvailabilities] = useState<Availability[]>([]);
   
   // Form states
   const [newUser, setNewUser] = useState<Omit<UserType, 'id'>>({ 
@@ -91,6 +93,36 @@ export default function App() {
 
   // Format date as YYYY-MM-DD
   const formatDate = (date: Date) => format(date, 'yyyy-MM-dd')
+
+  useEffect(() => {
+    console.log("Current auth state:", auth.currentUser);
+    console.log("Current user state:", currentUser);
+  }, [currentUser]);
+  
+  useEffect(() => {
+    console.log("Availabilities:", availabilities);
+  }, [availabilities]);
+
+  // Fetch availabilities on mount and when currentUser changes
+useEffect(() => {
+  if (!currentUser) return;
+
+  const unsubscribe = onSnapshot(
+    query(
+      collection(db, 'availabilities'),
+      where('userId', '==', currentUser)
+    ),
+    (snapshot) => {
+      const availData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Availability[];
+      setUserAvailabilities(availData);
+    }
+  );
+
+  return () => unsubscribe();
+}, [currentUser]);
 
   // Load data from Firebase
   useEffect(() => {
@@ -168,6 +200,37 @@ export default function App() {
     ))
   }
 
+  const toggleAvailability = async (date: Date) => {
+    if (!currentUser || isLoading) return;
+    setIsLoading(true);
+
+    const dateStr = date.toISOString().split('T')[0];
+    const existing = userAvailabilities.find(a => a.date === dateStr);
+
+    try {
+      if (existing) {
+        const newStatus = existing.status === 'available' ? 'unavailable' : 'available';
+        await updateDoc(doc(db, 'availabilities', existing.id), {
+          status: newStatus,
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        await setDoc(doc(collection(db, 'availabilities')), {
+          userId: currentUser,
+          date: dateStr,
+          status: 'available',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      }
+    } catch (error) {
+      console.error("Error toggling availability:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+
   // Availability functions
   const getUserAvailability = (userId: string, date: Date) => {
     const dateStr = formatDate(date)
@@ -192,6 +255,15 @@ export default function App() {
       return;
     }
   
+    // Ensure user is authenticated
+    const user = auth.currentUser;
+    if (!user) {
+      console.error("User not authenticated");
+      setIsDragging(false);
+      setDragSelection([]);
+      return;
+    }
+  
     try {
       const uniqueDates = Array.from(
         new Set(dragSelection.map(d => formatDate(d)))
@@ -200,7 +272,7 @@ export default function App() {
       // Get existing availabilities for current user
       const q = query(
         collection(db, 'availabilities'),
-        where('userId', '==', currentUser)
+        where('userId', '==', user.uid)
       );
       const querySnapshot = await getDocs(q);
       const existingAvailabilities = querySnapshot.docs.map(doc => ({
@@ -215,7 +287,7 @@ export default function App() {
           : doc(collection(db, 'availabilities'));
   
         const data = {
-          userId: currentUser,
+          userId: user.uid, // Use auth UID, not just currentUser
           date: dateStr,
           status: markingMode,
           updatedAt: serverTimestamp()
@@ -232,13 +304,16 @@ export default function App() {
       });
   
       await Promise.all(batchPromises);
+      console.log("Successfully updated availabilities");
     } catch (error) {
       console.error("Error updating availabilities:", error);
+      alert("Failed to update availability. Please check console for details.");
     } finally {
       setIsDragging(false);
       setDragSelection([]);
     }
   };
+  
   
 
   // Team management functions
@@ -487,11 +562,7 @@ export default function App() {
           </div>
 
           {/* Calendar grid */}
-          <div 
-            className="grid grid-cols-7 gap-2"
-            ref={calendarRef}
-            onMouseLeave={handleDragEnd}
-          >
+          <div className="grid grid-cols-7 gap-2" ref={calendarRef} onMouseLeave={handleDragEnd}>
             {/* Day headers */}
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
               <div key={day} className="text-center font-medium py-2">
@@ -501,25 +572,48 @@ export default function App() {
 
             {/* Calendar days */}
             {daysInMonth.map((day, index) => {
+              const dateStr = day.toISOString().split('T')[0];
               const rehearsal = getRehearsal(day);
               const isRehearsal = hasRehearsal(day);
-              const userAvailability = currentUser ? getUserAvailability(currentUser, day) : null;
-              const isInDragSelection = isDateInDragSelection(day);
+              const userAvailability = currentUser 
+                ? userAvailabilities.find(a => a.date === dateStr && a.userId === currentUser)
+                : null;
+              const isInDragSelection = dragSelection.some(d => 
+                d.toISOString().split('T')[0] === dateStr
+              );
 
               // Determine cell appearance
-              let cellAppearance = 'bg-muted';
+              let cellAppearance = 'bg-gray-50';
+              let borderAppearance = 'border-gray-200';
+              let textAppearance = 'text-gray-800';
+
               if (isInDragSelection) {
                 cellAppearance = markingMode === 'available' 
-                  ? 'bg-green-100 border-green-300' 
-                  : 'bg-red-100 border-red-300';
+                  ? 'bg-green-100' 
+                  : 'bg-red-100';
+                borderAppearance = markingMode === 'available'
+                  ? 'border-green-300'
+                  : 'border-red-300';
               } else if (isRehearsal) {
-                cellAppearance = 'bg-blue-50 border-blue-200';
+                cellAppearance = 'bg-blue-50';
+                borderAppearance = 'border-blue-200';
               } else if (userAvailability) {
                 cellAppearance = userAvailability.status === 'available' 
-                  ? 'bg-green-50 border-green-200' 
-                  : userAvailability.status === 'unavailable' 
-                    ? 'bg-red-50 border-red-200' 
-                    : 'bg-yellow-50 border-yellow-200';
+                  ? 'bg-green-50' 
+                  : 'bg-red-50';
+                borderAppearance = userAvailability.status === 'available'
+                  ? 'border-green-200'
+                  : 'border-red-200';
+              }
+
+              // Show different text color for current day
+              const today = new Date();
+              if (
+                day.getDate() === today.getDate() &&
+                day.getMonth() === today.getMonth() &&
+                day.getFullYear() === today.getFullYear()
+              ) {
+                textAppearance = 'text-blue-600 font-bold';
               }
 
               return (
@@ -528,15 +622,22 @@ export default function App() {
                   onMouseDown={() => handleDragStart(day)}
                   onMouseEnter={() => handleDragEnter(day)}
                   onMouseUp={handleDragEnd}
-                  className={`border rounded-lg p-2 min-h-32 cursor-pointer select-none ${
-                    day.getMonth() !== currentMonth.getMonth() ? 'opacity-50' : ''
-                  } ${cellAppearance}`}
+                  className={`
+                    border rounded-lg p-2 min-h-32 cursor-pointer select-none
+                    transition-colors duration-200 hover:shadow-sm
+                    ${day.getMonth() !== currentMonth.getMonth() ? 'opacity-50' : ''}
+                    ${cellAppearance}
+                    ${borderAppearance}
+                  `}
                 >
                   <div className="flex justify-between items-start">
-                    <span className="font-medium">{day.getDate()}</span>
+                    <span className={`${textAppearance}`}>
+                      {day.getDate()}
+                    </span>
                     {isRehearsal && (
-                      <div className="text-xs bg-blue-100 text-blue-800 px-1 rounded">
-                        Rehearsal
+                      <div className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        <span>{rehearsal.time}</span>
                       </div>
                     )}
                   </div>
@@ -544,28 +645,44 @@ export default function App() {
                   {/* User availability indicators */}
                   <div className="mt-2 space-y-1">
                     {users.map(user => {
-                      const availability = getUserAvailability(user.id, day);
+                      const availability = availabilities.find(a => 
+                        a.date === dateStr && a.userId === user.id
+                      );
+                      const statusSymbol = availability
+                        ? availability.status === 'available'
+                          ? '✓'
+                          : '✗'
+                        : '?';
+
                       return (
-                        <div key={user.id} className="flex items-center gap-1">
-                          <div className={`h-2 w-2 rounded-full ${user.color}`} />
-                          <span className="text-xs truncate">
-                            {availability
-                              ? availability.status === 'available'
-                                ? '✓'
-                                : availability.status === 'unavailable'
-                                ? '✗'
-                                : '?'
-                              : '-'}
+                        <div 
+                          key={user.id} 
+                          className="flex items-center gap-1.5 text-xs"
+                          title={`${user.name}: ${availability?.status || 'no response'}`}
+                        >
+                          <div 
+                            className={`h-2 w-2 rounded-full ${user.color} flex-shrink-0`} 
+                          />
+                          <span className="truncate font-medium">{user.name}</span>
+                          <span className="ml-auto font-bold">
+                            {statusSymbol}
                           </span>
                         </div>
                       );
                     })}
                   </div>
+
+                  {/* Rehearsal details tooltip */}
+                  {isRehearsal && (
+                    <div className="mt-2 text-xs text-blue-700">
+                      <div className="font-medium">{rehearsal.location}</div>
+                      <div className="truncate">{rehearsal.description}</div>
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
-
           {/* Legend */}
           <div className="mt-6 flex flex-wrap gap-4 text-sm">
             <div className="flex items-center gap-2">
@@ -855,5 +972,6 @@ export default function App() {
         </CardContent>
       </Card>
     </div>
+    
   )
 }

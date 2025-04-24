@@ -40,3 +40,11 @@
 .read-the-docs {
   color: #888;
 }
+
+.day-cell {
+  transition: background-color 0.2s ease;
+}
+.day-cell:hover {
+  cursor: pointer;
+  background-color: #f0f0f0;
+}
