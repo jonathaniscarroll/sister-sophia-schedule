@@ -17,6 +17,8 @@ import {
   onSnapshot
 } from 'firebase/firestore'
 import { getAuth, onAuthStateChanged } from "firebase/auth"
+import { signInWithRedirect } from "firebase/auth"
+import Auth from '@/components/Auth'; // Default import
 
 
 
@@ -51,7 +53,7 @@ type Rehearsal = {
 
 
 export default function App() {
-  const [user, loading] = useAuthState(auth)
+  const [user, loading, error] = useAuthState(auth)
   const [users, setUsers] = useState<UserType[]>([])
   const [availabilities, setAvailabilities] = useState<Availability[]>([])
   const [rehearsals, setRehearsals] = useState<Rehearsal[]>([])
@@ -61,6 +63,7 @@ export default function App() {
   // Format date as YYYY-MM-DD
   const formatDate = (date: Date) => format(date, 'yyyy-MM-dd')
 
+  // Debugging effect - runs only once
   useEffect(() => {
     console.log('Firebase Config:', {
       apiKey: import.meta.env.VITE_FIREBASE_API_KEY?.substring(0, 5) + '...',
@@ -69,21 +72,16 @@ export default function App() {
     });
   }, []);
 
+  // Auth state logging - runs only once
   useEffect(() => {
     const auth = getAuth()
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       console.log("Auth state changed:", user)
-      if (user) {
-        // User is signed in
-      } else {
-        // User is signed out
-      }
     })
     return () => unsubscribe()
   }, [])
 
-
-  // Load data from Firestore
+  // Load users data - depends on user
   useEffect(() => {
     if (!user) {
       setIsLoading(false)
@@ -101,6 +99,7 @@ export default function App() {
     return () => unsubscribe()
   }, [user])
 
+  // Load rehearsals data - depends on user
   useEffect(() => {
     if (!user) return
 
@@ -115,8 +114,12 @@ export default function App() {
     return () => unsubscribe()
   }, [user])
 
+  // Load availabilities data - depends on user
   useEffect(() => {
-    if (!user) return
+    if (!user) {
+      setIsLoading(false)
+      return
+    }
 
     const q = query(collection(db, 'availabilities'), where('userId', '==', user.uid))
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -130,6 +133,15 @@ export default function App() {
 
     return () => unsubscribe()
   }, [user])
+
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
+  }
 
   // Calendar functions
   const getDaysInMonth = (year: number, month: number) => {
@@ -173,16 +185,23 @@ export default function App() {
     )
   }
 
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Card className="w-full max-w-md">
+          <CardContent className="text-red-500">
+            Error: {error.message}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   if (!user) {
     return (
       <div className="flex items-center justify-center h-screen">
         <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle>Please sign in</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p>You need to be signed in to access the rehearsal scheduler.</p>
-          </CardContent>
+          <Auth />
         </Card>
       </div>
     )
@@ -191,7 +210,7 @@ export default function App() {
   return (
       
     <div className="container mx-auto px-4 py-8">
-      <DebugEnv />
+      
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
