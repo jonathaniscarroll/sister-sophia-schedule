@@ -1,0 +1,40 @@
+import { Button } from "/components/ui/button"
+import { getAuth, signInWithPopup, GoogleAuthProvider } from "firebase/auth"
+import { useEffect, useState } from "react"
+
+export function AuthButton() {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSignIn = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const auth = getAuth()
+      const provider = new GoogleAuthProvider()
+      // Add additional scopes if needed
+      provider.addScope('profile')
+      provider.addScope('email')
+      
+      await signInWithPopup(auth, provider)
+    } catch (err) {
+      console.error("Sign-in error:", err)
+      setError("Failed to sign in. Please try again.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <Button 
+        onClick={handleSignIn}
+        disabled={loading}
+        className="px-6 py-3"
+      >
+        {loading ? "Signing in..." : "Sign in with Google"}
+      </Button>
+      {error && <p className="text-red-500">{error}</p>}
+    </div>
+  )
+}
