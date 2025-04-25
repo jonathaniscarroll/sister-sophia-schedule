@@ -231,15 +231,29 @@ export default function App() {
 
   // Calendar functions
   const getDaysInMonth = (year: number, month: number) => {
-    const date = new Date(year, month, 1)
-    const days = []
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
     
-    while (date.getMonth() === month) {
-      days.push(new Date(date))
-      date.setDate(date.getDate() + 1)
+    // Get day of week for first day (0 = Sunday, 1 = Monday, etc.)
+    const firstDayOfWeek = firstDay.getDay();
+    
+    // Get days from previous month to show
+    const prevMonthDays = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1; // Adjust for Monday start
+    
+    const days = [];
+    
+    // Add days from previous month
+    for (let i = prevMonthDays; i > 0; i--) {
+      const date = new Date(year, month, -i + 1);
+      days.push(date);
     }
     
-    return days
+    // Add days from current month
+    for (let i = 1; i <= lastDay.getDate(); i++) {
+      days.push(new Date(year, month, i));
+    }
+    
+    return days;
   }
 
   const daysInMonth = getDaysInMonth(
@@ -617,7 +631,7 @@ const handleToggleAvailability = async (date: Date, status: 'available' | 'unava
             onMouseLeave={handleDragEnd}
           >
             {/* Day headers */}
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
               <div key={day} className="text-center font-medium py-2">
                 {day}
               </div>
@@ -626,6 +640,7 @@ const handleToggleAvailability = async (date: Date, status: 'available' | 'unava
             {/* Calendar days */}
                         
             {daysInMonth.map((day, index) => {
+              const isCurrentMonth = day.getMonth() === currentMonth.getMonth();
               const dateStr = day.toISOString().split('T')[0];
               const rehearsal = getRehearsal(day);
               const isRehearsal = hasRehearsal(day);
@@ -634,8 +649,9 @@ const handleToggleAvailability = async (date: Date, status: 'available' | 'unava
               );
 
               // Determine cell appearance
-              let cellAppearance = 'bg-gray-50';
+              let cellAppearance = isCurrentMonth ? 'bg-gray-50' : 'bg-gray-100';
               let borderAppearance = 'border-gray-200';
+              let textAppearance = isCurrentMonth ? 'text-gray-800' : 'text-gray-400';
 
               if (isInDragSelection) {
                 cellAppearance = markingMode === 'available' 
@@ -652,15 +668,16 @@ const handleToggleAvailability = async (date: Date, status: 'available' | 'unava
               return (
                 <div
                   key={index}
-                  onMouseDown={() => handleDragStart(day)}
-                  onMouseEnter={() => handleDragEnter(day)}
+                  onMouseDown={() => isCurrentMonth && handleDragStart(day)}
+                  onMouseEnter={() => isCurrentMonth && handleDragEnter(day)}
                   onMouseUp={handleDragEnd}
                   className={`
                     border rounded-lg p-2 min-h-32 cursor-pointer select-none
                     transition-colors duration-200 hover:shadow-sm
-                    ${day.getMonth() !== currentMonth.getMonth() ? 'opacity-50' : ''}
+                    ${textAppearance}
                     ${cellAppearance}
                     ${borderAppearance}
+                    ${!isCurrentMonth ? 'opacity-70' : ''}
                   `}
                 >
                   <div className="flex justify-between items-start">
