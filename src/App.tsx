@@ -25,6 +25,56 @@ import {
 import Modal from '@/components/Modal'
 import Auth from '@/components/Auth'
 
+function AvailabilityCell({ 
+  date, 
+  currentUser,
+  markingMode,
+  onToggle,
+  allAvailabilities
+}: {
+  date: Date
+  currentUser: string | null
+  markingMode: 'available' | 'unavailable'
+  onToggle: (date: Date, status: 'available' | 'unavailable') => Promise<void>
+  allAvailabilities: Availability[]
+}) {
+  const [loading, setLoading] = useState(false);
+  const dateStr = date.toISOString().split('T')[0];
+
+  // Get current status from props instead of separate Firestore listener
+  const currentStatus = currentUser 
+    ? allAvailabilities.find(a => 
+        a.date === dateStr && a.userId === currentUser
+      )?.status
+    : null;
+
+  const handleClick = async () => {
+    if (!currentUser || loading) return;
+    try {
+      setLoading(true);
+      await onToggle(date, markingMode);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div 
+      onClick={handleClick}
+      className={`
+        h-6 w-6 rounded-full cursor-pointer transition-colors
+        ${loading ? 'opacity-50' : ''}
+        ${currentStatus === 'available' ? 'bg-green-500' : 
+          currentStatus === 'unavailable' ? 'bg-red-500' : 'bg-gray-200'}
+        ${markingMode === 'available' ? 'hover:bg-green-400' : 'hover:bg-red-400'}
+      `}
+      title={currentStatus || 'Not set'}
+    />
+  );
+}
+
+
+
 // Types
 type UserType = {
   id: string
@@ -94,6 +144,23 @@ export default function App() {
   const formatDate = (date: Date) => format(date, 'yyyy-MM-dd')
 
   useEffect(() => {
+    const handleOnlineStatus = () => {
+      if (!navigator.onLine) {
+        console.warn('Application is offline');
+        // Implement offline UI state
+      }
+    };
+  
+    window.addEventListener('online', handleOnlineStatus);
+    window.addEventListener('offline', handleOnlineStatus);
+  
+    return () => {
+      window.removeEventListener('online', handleOnlineStatus);
+      window.removeEventListener('offline', handleOnlineStatus);
+    };
+  }, []);
+  
+  useEffect(() => {
     const testConnection = async () => {
       try {
         const testDoc = doc(db, 'test', 'connection');
@@ -105,7 +172,7 @@ export default function App() {
     };
     testConnection();
   }, []);
-  
+
   useEffect(() => {
     if (user) {
       console.log('Authenticated user:', user.uid);
@@ -198,19 +265,51 @@ export default function App() {
 
   // Enhanced drag functionality
   const handleDragStart = (date: Date) => {
-    if (!currentUser) return
-    setIsDragging(true)
-    setDragSelection([date])
-  }
+    if (!currentUser) return;
+    setIsDragging(true);
+    setDragSelection([date]);
+    // Immediately set the first date to current marking mode
+    handleToggleAvailability(date, markingMode);
+  };
+  
 
   const handleDragEnter = (date: Date) => {
-    if (!isDragging || !currentUser) return
+    if (!isDragging || !currentUser) return;
     
-    const dateStr = date.toISOString().split('T')[0]
+    const dateStr = date.toISOString().split('T')[0];
     if (!dragSelection.some(d => d.toISOString().split('T')[0] === dateStr)) {
-      setDragSelection(prev => [...prev, date])
+      setDragSelection(prev => [...prev, date]);
+      // Set each new date to current marking mode as we drag
+      handleToggleAvailability(date, markingMode);
     }
+  };
+  
+
+// Update the toggle function to handle both modes
+const handleToggleAvailability = async (date: Date, status: 'available' | 'unavailable') => {
+  if (!currentUser) return;
+  
+  const dateStr = date.toISOString().split('T')[0];
+  const docRef = doc(db, 'availabilities', `${currentUser}_${dateStr}`);
+  
+  // If clicking the same status again, remove the availability
+  const existing = allAvailabilities.find(a => 
+    a.date === dateStr && a.userId === currentUser
+  );
+  
+  if (existing?.status === status) {
+    await deleteDoc(docRef);
+  } else {
+    await setDoc(docRef, {
+      userId: currentUser,
+      date: dateStr,
+      status,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
   }
+};
+  
+  
 
   const handleDragEnd = async () => {
     if (!isDragging || !user || dragSelection.length === 0) {
@@ -446,7 +545,11 @@ export default function App() {
                 <label className="block text-sm font-medium mb-1">
                   I am:
                 </label>
-                <Select onValueChange={setCurrentUser} value={currentUser || ''}>
+
+                <Select 
+                  onValueChange={setCurrentUser} 
+                  value={currentUser || ''}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select your name" />
                   </SelectTrigger>
@@ -521,28 +624,29 @@ export default function App() {
             ))}
 
             {/* Calendar days */}
+                        
             {daysInMonth.map((day, index) => {
-              const dateStr = day.toISOString().split('T')[0]
-              const rehearsal = getRehearsal(day)
-              const isRehearsal = hasRehearsal(day)
+              const dateStr = day.toISOString().split('T')[0];
+              const rehearsal = getRehearsal(day);
+              const isRehearsal = hasRehearsal(day);
               const isInDragSelection = dragSelection.some(d => 
                 d.toISOString().split('T')[0] === dateStr
-              )
+              );
 
               // Determine cell appearance
-              let cellAppearance = 'bg-gray-50'
-              let borderAppearance = 'border-gray-200'
+              let cellAppearance = 'bg-gray-50';
+              let borderAppearance = 'border-gray-200';
 
               if (isInDragSelection) {
                 cellAppearance = markingMode === 'available' 
                   ? 'bg-green-100' 
-                  : 'bg-red-100'
+                  : 'bg-red-100';
                 borderAppearance = markingMode === 'available'
                   ? 'border-green-300'
-                  : 'border-red-300'
+                  : 'border-red-300';
               } else if (isRehearsal) {
-                cellAppearance = 'bg-blue-50'
-                borderAppearance = 'border-blue-200'
+                cellAppearance = 'bg-blue-50';
+                borderAppearance = 'border-blue-200';
               }
 
               return (
@@ -578,22 +682,32 @@ export default function App() {
                     )}
                   </div>
 
+                  {/* Add the availability cell */}
+                  <div className="mt-2 flex justify-center">
+                  <AvailabilityCell 
+                    date={day}
+                    currentUser={currentUser}
+                    markingMode={markingMode}
+                    onToggle={handleToggleAvailability}
+                    allAvailabilities={allAvailabilities}
+                  />
+                  </div>
+
                   {/* User availability indicators */}
                   <div className="mt-2 space-y-1">
                     {users.map(user => {
                       const availability = allAvailabilities.find(a => 
                         a.date === dateStr && a.userId === user.id
-                      )
-                      const statusSymbol = availability
-                        ? availability.status === 'available'
-                          ? '✓'
-                          : '✗'
-                        : '?'
-
+                      );
+                      
                       return (
                         <div 
                           key={user.id} 
-                          className="flex items-center gap-1.5 text-xs"
+                          className={`
+                            flex items-center gap-1.5 text-xs p-1 rounded
+                            ${availability?.status === 'available' ? 'bg-green-50' : 
+                              availability?.status === 'unavailable' ? 'bg-red-50' : 'bg-gray-50'}
+                          `}
                           title={`${user.name}: ${availability?.status || 'no response'}`}
                         >
                           <div 
@@ -602,10 +716,12 @@ export default function App() {
                           />
                           <span className="truncate font-medium">{user.name}</span>
                           <span className="ml-auto font-bold">
-                            {statusSymbol}
+                            {availability 
+                              ? availability.status === 'available' ? '✓' : '✗'
+                              : '?'}
                           </span>
                         </div>
-                      )
+                      );
                     })}
                   </div>
 
@@ -617,7 +733,7 @@ export default function App() {
                     </div>
                   )}
                 </div>
-              )
+              );
             })}
           </div>
 
